@@ -47,6 +47,6 @@ if [ ! -f "config.json" ]; then
 fi
 
 echo
-echo "[*] Starting mhr-cfw ..."
+echo "[*] Starting Aras-GP ..."
 echo
 exec "$VPY" main.py "$@"

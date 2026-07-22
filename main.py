@@ -14,11 +14,11 @@ import logging
 import os
 import sys
 
-# Project modules live under ./src — put that folder on sys.path so the
+# Project modules live under ./engine — put that folder on sys.path so the
 # historical flat imports ("from proxy_server import …") keep working.
-_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
-if _SRC_DIR not in sys.path:
-    sys.path.insert(0, _SRC_DIR)
+_ENGINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine")
+if _ENGINE_DIR not in sys.path:
+    sys.path.insert(0, _ENGINE_DIR)
 
 from cert_installer import install_ca, uninstall_ca, is_ca_trusted
 from constants import __version__

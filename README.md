@@ -94,11 +94,15 @@ python -m panel
 واقعاً زنده باشد: آمار مستقیماً از شیء در حال اجرا خوانده می‌شود، نه از روی
 pars کردن لاگ.
 
-موتور رله‌ی زیرین بر پایه‌ی پروژه‌ی متن‌باز
-[**MHR-CFW**](https://github.com/denuitt1/mhr-cfw) است (پروانه‌ی MIT) که
-پیاده‌سازی Domain Fronting، چرخش SNI، MITM محلی و مسیریابی HTTP/2 را فراهم
-می‌کند. Aras-GP لایه‌ی مدیریت، دیپلوی خودکار و سیستم چندکاربره را روی آن
-می‌سازد.
+کد پروژه در دو لایه‌ی مستقل چیده شده است:
+
+| پوشه | نقش |
+|---|---|
+| `panel/` | لایه‌ی مدیریت — Flask، رابط کاربری، دیپلوی، کاربران، بکاپ |
+| `engine/` | موتور رله — Domain Fronting، چرخش SNI، MITM محلی، HTTP/2 |
+| `scripts/` | اجرای پس‌زمینه و نصب برای هر سه سیستم‌عامل |
+
+موتور رله بر پایه‌ی کد متن‌باز با پروانه‌ی MIT ساخته شده است (بخش Credits).
 
 ---
 
@@ -129,7 +133,7 @@ CSP سخت‌گیرانه بدون `unsafe-inline`، و نوشتن `config.json`
 | بخش | پروانه |
 |---|---|
 | `panel/` | **اختصاصی** — [`panel/LICENSE`](panel/LICENSE) |
-| `src/`, `deploy/`, `main.py`, `setup.py` | **MIT** — [`LICENSE`](LICENSE) |
+| `engine/`, `deploy/`, `main.py`, `setup.py` | **MIT** — [`LICENSE`](LICENSE) |
 
 پروانه‌ی پنل، اجرای خصوصی نامحدود و حسابرسی امنیتی را کاملاً آزاد می‌گذارد؛
 ولی ری‌برندسازی و فروش مجدد بدون اجازه‌ی کتبی مجاز نیست.
@@ -172,14 +176,16 @@ python -m panel          # → http://127.0.0.1:8600
 
 Full documentation: [`panel/README.md`](panel/README.md).
 
-The underlying relay engine is based on the open-source
-[MHR-CFW](https://github.com/denuitt1/mhr-cfw) project (MIT). Aras-GP adds the
-management, deployment and multi-user layers on top.
+The relay engine under `engine/` derives from MIT-licensed open-source code;
+the full licence text is kept in [`LICENSE`](LICENSE) as MIT requires.
 
 ---
 
 ## Credits
 
-- رله‌ی زیرین: [denuitt1/mhr-cfw](https://github.com/denuitt1/mhr-cfw) — پروانه‌ی MIT
+موتور رله‌ی این پروژه از کد متن‌باز
+[denuitt1/mhr-cfw](https://github.com/denuitt1/mhr-cfw) مشتق شده که تحت
+پروانه‌ی **MIT** منتشر شده است. متن کامل آن پروانه در فایل
+[`LICENSE`](LICENSE) نگه داشته شده — همان‌طور که MIT الزام می‌کند.
+
 - با تشکر از [onlymaj](https://github.com/onlymaj)
-- مستندات اصلی پروژه‌ی رله: [`README_ORIGINAL.md`](README_ORIGINAL.md) · [`README_FA.md`](README_FA.md)

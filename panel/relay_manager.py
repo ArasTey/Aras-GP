@@ -33,9 +33,9 @@ import threading
 import time
 from collections import deque
 
-from cert_installer import is_ca_trusted          # from src/
-from mitm import CA_CERT_FILE                     # from src/
-from proxy_server import ProxyServer              # from src/
+from cert_installer import is_ca_trusted          # from engine/
+from mitm import CA_CERT_FILE                     # from engine/
+from proxy_server import ProxyServer              # from engine/
 
 log = logging.getLogger("panel.relay")
 
@@ -45,7 +45,7 @@ MAX_LOG_LINES = 400
 PERSIST_EVERY = 60.0      # how often per-user byte counters are flushed to disk
 
 
-#: Loggers the relay engine actually uses (see ``src/*.py``). The status page
+#: Loggers the relay engine actually uses (see ``engine/*.py``). The status page
 #: shows only these — attaching the buffer to the root logger would drown the
 #: relay's output in Werkzeug's HTTP access lines from the panel itself.
 RELAY_LOGGERS = frozenset({

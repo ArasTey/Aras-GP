@@ -24,7 +24,7 @@ from cryptography.x509.oid import NameOID
 
 log = logging.getLogger("MITM")
 
-# CA lives at the project root (../ca/ relative to this file in src/).
+# CA lives at the project root (../ca/ relative to this file in engine/).
 # The installed trusted root was generated there; keep using it.
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_THIS_DIR)
@@ -71,8 +71,8 @@ class MITMCertManager:
             public_exponent=65537, key_size=2048
         )
         subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "mhr-cfw"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "mhr-cfw"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "Aras-GP"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Aras-GP"),
         ])
         now = datetime.datetime.now(datetime.timezone.utc)
         self._ca_cert = (
