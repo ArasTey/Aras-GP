@@ -23,6 +23,8 @@ import os
 import re
 import time
 
+import requests
+
 from flask import (
     Flask, Response, flash, jsonify, redirect, render_template, request,
     send_file, url_for,
@@ -310,6 +312,8 @@ def create_app() -> Flask:
             cf=state["cloudflare"],
             forwarder_env=forwarder_env,
             upstream=(config.get("upstream_proxy") or {}),
+            forwarder=state["forwarder"],
+            forwarder_hosts=(config.get("forwarder_hosts") or []),
             default_ai_hosts=list(DEFAULT_AI_HOSTS),
             license=licensing.check(),
         )
@@ -539,6 +543,94 @@ def create_app() -> Flask:
             return _fail("رله پیدا نشد.", 404)
         return _ok(relays=store.list_relays(), message="رله حذف شد.")
 
+    # ── fronted forwarder (AI over Google) ────────────────────────────
+
+    @app.post("/api/forwarder/save")
+    @security.login_required
+    def api_forwarder_save():
+        """Route chosen hosts through the Worker → your VPS, still fronted.
+
+        Writes ``forwarder_hosts`` into config.json (the engine tags those
+        requests with ``f:1`` so the Worker forwards them) and keeps the URL
+        and key for the next Worker deploy, which must carry both as bindings.
+        """
+        body = _json_body()
+        config = store.load_config()
+        if config is None:
+            return _fail("ابتدا کانفیگ رله را بسازید.")
+
+        enabled = str(body.get("enabled", "")).lower() in ("1", "true", "on")
+        url = (body.get("url") or "").strip().rstrip("/")
+        key = (body.get("auth_key") or "").strip()
+        hosts = configgen.as_list(body.get("hosts")) or list(DEFAULT_AI_HOSTS)
+
+        if enabled:
+            if not url.startswith("https://"):
+                return _fail(
+                    "آدرس فورواردر باید با https:// شروع شود — "
+                    "Worker به آدرس بدون TLS فوروارد نمی‌کند."
+                )
+            if len(key) < 32:
+                return _fail("کلید فورواردر باید حداقل ۳۲ کاراکتر باشد.")
+
+        config["forwarder_hosts"] = hosts if enabled else []
+        store.save_config(config)
+        store.update(forwarder={"url": url, "auth_key": key, "enabled": enabled})
+
+        message = "ذخیره شد."
+        if enabled:
+            message += (" برای اعمال، Worker را دوباره دیپلوی کنید تا "
+                        "آدرس و کلید فورواردر روی آن bind شود.")
+        if manager.running:
+            ok, detail = manager.restart(store.load_config())
+            message += f" رله بازراه‌اندازی {'شد' if ok else 'نشد'}."
+        return _ok(message=message, hosts=hosts)
+
+    @app.post("/api/forwarder/test")
+    @security.login_required
+    @security.rate_limit("fwd_test", limit=10, window=60)
+    def api_forwarder_test():
+        """One real request to the forwarder, only when the button is pressed."""
+        body = _json_body()
+        saved = store.load()["forwarder"]
+        url = (body.get("url") or saved.get("url") or "").strip().rstrip("/")
+        key = (body.get("auth_key") or saved.get("auth_key") or "").strip()
+        if not url:
+            return _fail("آدرس فورواردر وارد نشده است.")
+        if not url.startswith("https://"):
+            return _fail("آدرس فورواردر باید https باشد.")
+
+        payload = json.dumps({"u": "https://api.ipify.org", "m": "GET",
+                              "h": {"User-Agent": "Aras-GP"}, "r": True})
+        try:
+            response = requests.post(
+                url, data=payload, timeout=25,
+                headers={"content-type": "application/json",
+                         "x-upstream-auth": key},
+            )
+        except requests.RequestException as exc:
+            return _fail(f"اتصال به فورواردر برقرار نشد: {type(exc).__name__}", 502)
+
+        if response.status_code == 403:
+            return _fail("کلید فورواردر اشتباه است.", 502)
+        if response.status_code != 200:
+            return _fail(f"فورواردر کد {response.status_code} برگرداند.", 502)
+        try:
+            data = response.json()
+        except ValueError:
+            return _fail("پاسخ فورواردر JSON نبود.", 502)
+        if "e" in data:
+            return _fail(f"فورواردر خطا داد: {data['e']}", 502)
+
+        ip = ""
+        if data.get("b"):
+            import base64 as _b64
+            try:
+                ip = _b64.b64decode(data["b"]).decode("utf-8", "replace").strip()
+            except Exception:
+                ip = ""
+        return _ok(ip=ip[:64], status=data.get("s"))
+
     # ── upstream exit (AI hosts / static IP) ──────────────────────────
 
     @app.post("/api/upstream/save")
@@ -692,7 +784,10 @@ def create_app() -> Flask:
 
         try:
             token = _cf_token(body)
-            result = cloudflare.deploy(token, account_id, script_name, upstream)
+            result = cloudflare.deploy(
+                token, account_id, script_name, upstream,
+                store.load()["forwarder"].get("auth_key", ""),
+            )
         except ValueError as exc:
             return _fail(str(exc))
         except cloudflare.CloudflareError as exc:

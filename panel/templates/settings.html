@@ -123,7 +123,104 @@
 
 <section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
   <div class="ar-card__head">
-    <h2 class="ar-card__title">{{ icon('globe', 18) }} خروجی اختصاصی — AI و IP ثابت</h2>
+    <h2 class="ar-card__title">{{ icon('shield', 18) }} AI از مسیر گوگل — روش امن</h2>
+    {% if forwarder.enabled %}<span class="ar-pill ar-pill--on">فعال</span>
+    {% else %}<span class="ar-pill ar-pill--off">غیرفعال</span>{% endif %}
+  </div>
+
+  <div class="ar-note ar-note--info">
+    {{ icon('info', 16) }}
+    <div>
+      <b>این روش، Domain Fronting را حفظ می‌کند.</b> مسیر:
+      <div class="ar-mono ar-ltr" style="font-size:11.5px;margin:var(--ar-s2) 0">
+        browser → relay → TLS(SNI=google.com) → Apps Script → Worker → HTTPS → VPS شما → مقصد
+      </div>
+      ISP فقط یک اتصال TLS به گوگل می‌بیند، و مقصد IP ثابت VPS شما را می‌بیند
+      (نه رنج Cloudflare که OpenAI بلاک کرده). این تفاوت اصلی با روش پایین است.
+    </div>
+  </div>
+
+  <div class="ar-code" style="margin-top:var(--ar-s4)">
+    <div class="ar-code__bar">
+      <span class="ar-mono">روی VPS اجرا کنید — با دامنه</span>
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#fwd-cmd1"
+              data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button>
+    </div>
+    <pre id="fwd-cmd1">curl -fsSL https://raw.githubusercontent.com/ArasTey/Aras-GP/main/scripts/install-forwarder.sh -o f.sh
+sudo bash f.sh --domain fwd.example.com</pre>
+  </div>
+
+  <div class="ar-code" style="margin-top:var(--ar-s3)">
+    <div class="ar-code__bar">
+      <span class="ar-mono">یا بدون دامنه — با Cloudflare Tunnel</span>
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#fwd-cmd2"
+              data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button>
+    </div>
+    <pre id="fwd-cmd2">curl -fsSL https://raw.githubusercontent.com/ArasTey/Aras-GP/main/scripts/install-forwarder.sh -o f.sh
+sudo bash f.sh --tunnel</pre>
+  </div>
+
+  <div class="ar-stack" style="gap:var(--ar-s4);margin-top:var(--ar-s5)">
+    <label class="ar-switch">
+      <input type="checkbox" id="fwd-enabled" {% if forwarder.enabled %}checked{% endif %}>
+      <span class="ar-switch__track"></span>
+      <span class="ar-switch__text">
+        <b>عبور میزبان‌های AI از فورواردر</b>
+        <span>موتور به Worker می‌گوید این درخواست‌ها را به VPS شما بفرستد.</span>
+      </span>
+    </label>
+
+    <div class="ar-grid ar-grid--2">
+      <div class="ar-field">
+        <label class="ar-label" for="fwd-url">آدرس فورواردر (HTTPS)</label>
+        <input class="ar-input ar-mono" type="text" id="fwd-url" dir="ltr"
+               value="{{ forwarder.url or '' }}" placeholder="https://fwd.example.com">
+      </div>
+      <div class="ar-field">
+        <label class="ar-label" for="fwd-key">کلید فورواردر</label>
+        <div class="ar-input-group">
+          <input class="ar-input ar-mono" type="text" id="fwd-key" dir="ltr"
+                 value="{{ forwarder.auth_key or '' }}" autocomplete="off"
+                 placeholder="حداقل ۳۲ کاراکتر">
+          <button class="ar-btn ar-btn--sm" id="fwd-test" type="button">
+            {{ icon('zap', 14) }}<span>تست</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <span class="ar-hint" id="fwd-test-result">
+      هر دو مقدار را اسکریپت نصب آخر کارش چاپ می‌کند. «تست» یک درخواست واقعی
+      از فورواردر می‌فرستد و IP خروجی را نشان می‌دهد.
+    </span>
+
+    <div class="ar-field">
+      <label class="ar-label" for="fwd-hosts">میزبان‌هایی که از فورواردر می‌روند</label>
+      <textarea class="ar-textarea ar-ltr" id="fwd-hosts" rows="6" spellcheck="false"
+                >{{ (forwarder_hosts or default_ai_hosts)|join('\n') }}</textarea>
+      <span class="ar-hint">هر دامنه در یک خط؛ زیردامنه‌ها خودکار شامل می‌شوند.</span>
+    </div>
+
+    <div class="ar-note ar-note--warn">
+      {{ icon('alert', 16) }}
+      <div>
+        بعد از ذخیره، حتماً یک بار <b>Worker را دوباره دیپلوی کنید</b>
+        (صفحه‌ی دیپلوی → دیپلوی Worker). آدرس و کلید فورواردر باید روی خود
+        Worker بایند شوند وگرنه فوروارد انجام نمی‌شود.
+      </div>
+    </div>
+
+    <div class="ar-row ar-row--end">
+      <button class="ar-btn ar-btn--primary" id="fwd-save" type="button">
+        {{ icon('save', 15) }}<span>ذخیره</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('globe', 18) }} خروجی مستقیم — سریع‌تر، بدون fronting</h2>
     {% if upstream.enabled %}<span class="ar-pill ar-pill--on">فعال</span>
     {% else %}<span class="ar-pill ar-pill--off">غیرفعال</span>{% endif %}
   </div>
@@ -345,6 +442,34 @@
 (function () {
   document.querySelectorAll("[data-epoch]").forEach(function (node) {
     if (node.dataset.epoch) node.textContent = Aras.dateTime(node.dataset.epoch);
+  });
+
+  /* fronted forwarder */
+  Aras.action(document.getElementById("fwd-test"), function () {
+    var out = document.getElementById("fwd-test-result");
+    return Aras.post("/api/forwarder/test", {
+      url: document.getElementById("fwd-url").value.trim(),
+      auth_key: document.getElementById("fwd-key").value.trim()
+    }).then(function (data) {
+      if (data.ok) {
+        out.innerHTML = '<span class="ar-pill ar-pill--on">سالم</span> ' +
+          "IP خروجی: <b class='ar-mono ar-ltr'>" + Aras.escape(data.ip || "?") + "</b>";
+        Aras.toast("فورواردر سالم است.", "success");
+      } else {
+        out.innerHTML = '<span class="ar-pill ar-pill--bad">ناموفق</span> ' +
+          Aras.escape(data.error || "");
+        Aras.toast(data.error || "تست ناموفق بود.", "error", 8000);
+      }
+    });
+  });
+
+  Aras.action(document.getElementById("fwd-save"), function () {
+    return Aras.post("/api/forwarder/save", {
+      enabled: document.getElementById("fwd-enabled").checked ? "1" : "",
+      url: document.getElementById("fwd-url").value.trim(),
+      auth_key: document.getElementById("fwd-key").value.trim(),
+      hosts: document.getElementById("fwd-hosts").value
+    }).then(function (data) { Aras.report(data); });
   });
 
   /* upstream exit */
