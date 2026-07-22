@@ -246,8 +246,7 @@
   }
 
   function tick() { refreshStatus(); refreshLogs(); }
-  tick();
-  setInterval(tick, 5000);
+  Aras.poll(tick, 5000);
   levelPick.addEventListener("change", refreshLogs);
 
   document.getElementById("log-clear").addEventListener("click", function () {

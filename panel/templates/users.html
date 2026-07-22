@@ -242,8 +242,7 @@
     });
   }
 
-  refresh();
-  setInterval(refresh, 7000);
+  Aras.poll(refresh, 7000);
 
   /* ── auth toggle ── */
   var authToggle = document.getElementById("auth-toggle");

@@ -125,6 +125,7 @@ class RelayManager:
         #: request. ``switch_hook`` is set by the app layer.
         self.failover = FailoverMonitor()
         self.switch_hook = None
+        self._switching = False
 
     # ── lifecycle ─────────────────────────────────────────────────────
 
@@ -378,8 +379,14 @@ class RelayManager:
 
     def _stop_sampler(self) -> None:
         self._sampler_stop.set()
-        if self._sampler and self._sampler.is_alive():
-            self._sampler.join(timeout=SAMPLE_INTERVAL + 1)
+        sampler = self._sampler
+        # Never join ourselves: failover runs on the sampler thread and calls
+        # restart() → stop() → here. join() on the current thread raises, which
+        # aborted stop() half-way and left the sampler flagged dead — silently
+        # killing stats, quota persistence and failover itself.
+        if (sampler and sampler.is_alive()
+                and sampler is not threading.current_thread()):
+            sampler.join(timeout=SAMPLE_INTERVAL + 1)
         self._sampler = None
 
     def _sample_loop(self) -> None:
@@ -425,30 +432,51 @@ class RelayManager:
                 log.debug("Sampler error: %s", exc)
 
     def _attempt_failover(self) -> None:
-        """Hand off to the app layer, which owns the saved-relay store."""
-        if not self.switch_hook:
+        """Hand off to the app layer, which owns the saved-relay store.
+
+        The switch restarts the relay, and restarting tears down this very
+        sampler thread. Doing that inline would have the thread wait on its own
+        shutdown, so the work is handed to a short-lived worker and this tick
+        returns immediately. The worker is one-shot: it exits as soon as the
+        switch is done, and start() brings up a fresh sampler.
+        """
+        if not self.switch_hook or self._switching:
             return
-        try:
-            moved = self.switch_hook(self.failover.last_reason)
-        except Exception as exc:
-            log.error("Failover attempt failed: %s", exc)
-            return
-        if moved:
-            self.failover.note_switch()
-            log.warning("Switched relay automatically — %s",
-                        self.failover.last_reason)
-        else:
-            # Nowhere to go; stop re-deciding every 5 s.
-            self.failover.reset()
+        reason = self.failover.last_reason
+        self._switching = True
+
+        def run():
+            try:
+                moved = self.switch_hook(reason)
+            except Exception as exc:
+                log.error("Failover attempt failed: %s", exc)
+                moved = False
+            if moved:
+                self.failover.note_switch()
+                log.warning("Switched relay automatically — %s", reason)
+            else:
+                # Nowhere to go; stop re-deciding every 5 s.
+                self.failover.reset()
+            self._switching = False
+
+        threading.Thread(target=run, name="aras-failover", daemon=True).start()
 
     def series(self, limit: int = 120) -> list[dict]:
         return list(self._samples)[-limit:]
 
     # ── status ────────────────────────────────────────────────────────
 
-    def status(self) -> dict:
+    def status(self, snapshot: dict | None = None) -> dict:
+        """Current state. Pass ``snapshot`` to reuse a stats() call.
+
+        /api/stats needs both, and each stats() is a round trip onto the relay
+        loop — fetching it twice per poll doubled that traffic for nothing.
+        """
         config = self.config or {}
-        snapshot = self.stats() if self.running else None
+        if snapshot is None and self.running:
+            snapshot = self.stats()
+        elif not self.running:
+            snapshot = None
         per_site = snapshot["per_site"] if snapshot else []
         script_ids = config.get("script_ids") or config.get("script_id") or ""
         if isinstance(script_ids, str):
