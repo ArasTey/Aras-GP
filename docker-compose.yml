@@ -1,18 +1,18 @@
-name: "mhr-cfw-docker"
+name: "Aras-GP-docker"
 
 services:
-  mhr-cfw:
+  Aras-GP:
     image: .
-    container_name: "mhr-cfw"
+    container_name: "Aras-GP"
     restart: unless-stopped
     networks:
-      - mhr-cfw-proxy
+      - Aras-GP-proxy
     ports:
       - "8085:8085" # http port
       - "1080:1080" # socks5 port
 
 networks:
-  mhr-cfw-proxy:
-    name: mhr-cfw-proxy
+  Aras-GP-proxy:
+    name: Aras-GP-proxy
     driver: bridge
     external: false

@@ -72,7 +72,7 @@ if not errorlevel 1 (
 
 
 echo.
-echo [*] Starting mhr-cfw ...
+echo [*] Starting Aras-GP ...
 echo.
 "%VPY%" main.py %*
 set "RC=%errorlevel%"

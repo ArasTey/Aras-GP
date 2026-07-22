@@ -1,6 +1,6 @@
 # docker-compose.yml
 
-name: "mhr-cfw-upstream-forwarder-cluster"
+name: "Aras-GP-upstream-forwarder-cluster"
 
 services:
   traefik:
@@ -48,10 +48,10 @@ services:
       - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
       - "traefik.http.services.portainer.loadbalancer.server.port=9000"
       - "traefik.docker.network=traefik-network"
-  mhr-cfw-upstream-forwarder-node1:
-    image: mhr-cfw-upstream-forwarder-node1
-    build: ./services/mhr-cfw-upstream-forwarder/.
-    container_name: mhr-cfw-upstream-forwarder-node1
+  Aras-GP-upstream-forwarder-node1:
+    image: Aras-GP-upstream-forwarder-node1
+    build: ./services/Aras-GP-upstream-forwarder/.
+    container_name: Aras-GP-upstream-forwarder-node1
     restart: unless-stopped
     networks:
       - traefik-network
@@ -61,11 +61,11 @@ services:
       HOST: 0.0.0.0
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node1.rule=Host(`node1.${DOMAIN}`)"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node1.entrypoints=web,websecure"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node1.tls=true"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node1.tls.certresolver=letsencrypt"
-      - "traefik.http.services.mhr-cfw-upstream-forwarder-node1.loadbalancer.server.port=8787"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node1.rule=Host(`node1.${DOMAIN}`)"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node1.entrypoints=web,websecure"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node1.tls=true"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node1.tls.certresolver=letsencrypt"
+      - "traefik.http.services.Aras-GP-upstream-forwarder-node1.loadbalancer.server.port=8787"
       - "traefik.docker.network=traefik-network"
     # Optional: basic healthcheck
     healthcheck:
@@ -74,10 +74,10 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-  mhr-cfw-upstream-forwarder-node2:
-    image: mhr-cfw-upstream-forwarder-node2
-    build: ./services/mhr-cfw-upstream-forwarder/.
-    container_name: mhr-cfw-upstream-forwarder-node2
+  Aras-GP-upstream-forwarder-node2:
+    image: Aras-GP-upstream-forwarder-node2
+    build: ./services/Aras-GP-upstream-forwarder/.
+    container_name: Aras-GP-upstream-forwarder-node2
     restart: unless-stopped
     networks:
       - traefik-network
@@ -87,11 +87,11 @@ services:
       HOST: 0.0.0.0
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node2.rule=Host(`node2.${DOMAIN}`)"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node2.entrypoints=web,websecure"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node2.tls=true"
-      - "traefik.http.routers.mhr-cfw-upstream-forwarder-node2.tls.certresolver=letsencrypt"
-      - "traefik.http.services.mhr-cfw-upstream-forwarder-node2.loadbalancer.server.port=8787"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node2.rule=Host(`node2.${DOMAIN}`)"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node2.entrypoints=web,websecure"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node2.tls=true"
+      - "traefik.http.routers.Aras-GP-upstream-forwarder-node2.tls.certresolver=letsencrypt"
+      - "traefik.http.services.Aras-GP-upstream-forwarder-node2.loadbalancer.server.port=8787"
       - "traefik.docker.network=traefik-network"
     # Optional: basic healthcheck
     healthcheck:

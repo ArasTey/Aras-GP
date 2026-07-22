@@ -1377,7 +1377,7 @@ class DomainFronter:
         log.info("Parallel streaming download: %d bytes, %d chunks of %d KB",
                  total_size, len(ranges) + 1, chunk_size // 1024)
 
-        temp_file = tempfile.TemporaryFile(prefix="mhrvpn_dl_")
+        temp_file = tempfile.TemporaryFile(prefix="arasgp_dl_")
         file_lock = asyncio.Lock()
         sem = asyncio.Semaphore(max_parallel)
         cancel_event = asyncio.Event()

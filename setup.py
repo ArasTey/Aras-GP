@@ -166,7 +166,7 @@ def write_config(cfg: dict) -> None:
 
 def main() -> int:
     print()
-    print(bold("mhr-cfw - setup wizard"))
+    print(bold("Aras-GP - setup wizard"))
     print(dim("Answer a few questions and we'll write config.json for you."))
 
     if CONFIG_PATH.exists():

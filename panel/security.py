@@ -18,7 +18,7 @@ from functools import wraps
 
 from flask import flash, g, jsonify, redirect, request, session, url_for
 
-from account_manager import hash_password, verify_password  # from src/
+from account_manager import hash_password, verify_password  # from engine/
 from . import store
 
 log = logging.getLogger("panel.security")

@@ -10,14 +10,14 @@ This licence governs ONLY the contents of the `panel/` directory (the
 "Panel"): its Python modules, HTML templates, CSS, JavaScript, and the
 Aras-GP brand assets under `panel/static/brand/`.
 
-It does NOT apply to the relay engine. The files under `src/`, `deploy/`,
-`main.py` and `setup.py` — including `src/account_manager.py` and the
-modifications made to `src/proxy_server.py` for per-user authentication —
+It does NOT apply to the relay engine. The files under `engine/`, `deploy/`,
+`main.py` and `setup.py` — including `engine/account_manager.py` and the
+modifications made to `engine/proxy_server.py` for per-user authentication —
 remain under the MIT licence stated in the repository root `LICENSE` file,
 because they are derived from MIT-licensed code. Nothing in this document
 attempts to revoke or narrow that grant.
 
-این پروانه فقط شامل محتویات پوشه‌ی `panel/` است. موتور رله زیر `src/` و
+این پروانه فقط شامل محتویات پوشه‌ی `panel/` است. موتور رله زیر `engine/` و
 `deploy/` همچنان تحت پروانه‌ی MIT مندرج در فایل `LICENSE` ریشه‌ی مخزن باقی
 می‌ماند.
 

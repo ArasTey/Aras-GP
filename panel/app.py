@@ -784,7 +784,7 @@ def create_app() -> Flask:
     @security.login_required
     @security.rate_limit("ca_install", limit=4, window=120)
     def api_ca_install():
-        from cert_installer import install_ca      # from src/
+        from cert_installer import install_ca      # from engine/
         from mitm import CA_CERT_FILE, MITMCertManager
 
         if not os.path.exists(CA_CERT_FILE):

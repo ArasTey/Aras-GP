@@ -185,14 +185,14 @@ def configure(level: str = "INFO", *, stream=None) -> None:
 
     handler = logging.StreamHandler(stream)
     handler.setFormatter(PrettyFormatter(use_color=use_color))
-    handler.set_name("mhrvpn.pretty")
+    handler.set_name("arasgp.pretty")
 
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
     # Remove previous pretty handler(s) we installed.
     for h in list(root.handlers):
-        if getattr(h, "name", "") == "mhrvpn.pretty":
+        if getattr(h, "name", "") == "arasgp.pretty":
             root.removeHandler(h)
     root.addHandler(handler)
 
@@ -234,8 +234,8 @@ def print_banner(version: str, *, stream=None) -> None:
     def c(code: str) -> str:
         return code if color else ""
 
-    title = "mhr-cfw"
-    subtitle = "Domain-Fronted GAS-CFW Relay"
+    title = "Aras-GP"
+    subtitle = "Domain-Fronted Relay Engine"
     version_tag = f"v{version}"
 
     left = f" {title} "

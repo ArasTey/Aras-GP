@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 import time
 
-from account_manager import hash_password   # from src/
+from account_manager import hash_password   # from engine/
 from . import store
 from .relay_manager import manager
 

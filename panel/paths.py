@@ -11,7 +11,7 @@ import os
 
 PANEL_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(PANEL_DIR)
-SRC_DIR = os.path.join(PROJECT_ROOT, "src")
+ENGINE_DIR = os.path.join(PROJECT_ROOT, "engine")
 
 DATA_DIR = os.environ.get("ARAS_DATA_DIR") or os.path.join(PANEL_DIR, "data")
 PROFILES_DIR = os.path.join(DATA_DIR, "profiles")

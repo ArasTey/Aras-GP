@@ -6,7 +6,7 @@ types, same defaults — because the output of this module is fed straight to
 way to fill in the file the relay already understands.
 
 The only addition is the ``proxy_auth`` block, which the panel writes for the
-multi-user layer in ``src/account_manager.py``. It is namespaced under a single
+multi-user layer in ``engine/account_manager.py``. It is namespaced under a single
 new key so an older relay simply ignores it.
 """
 
