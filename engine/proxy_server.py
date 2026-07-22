@@ -42,6 +42,9 @@ from constants import (
     UNCACHEABLE_HEADER_NAMES,
 )
 from account_manager import AccountManager, CountedReader, CountedWriter
+from upstream_proxy import (
+    DEFAULT_AI_HOSTS, HostMatcher, UpstreamError, UpstreamProxy,
+)
 from domain_fronter import DomainFronter
 
 log = logging.getLogger("Proxy")
@@ -261,6 +264,30 @@ class ProxyServer:
         # e.g. ".local" matches any *.local domain.
         self._block_hosts  = self._load_host_rules(config.get("block_hosts", []))
         self._bypass_hosts = self._load_host_rules(config.get("bypass_hosts", []))
+
+        # ── Upstream SOCKS5 exit (operator's own VPS) ──────────────
+        # Selected hosts leave through a proxy the operator controls instead
+        # of the Apps Script chain. This is what makes AI services reachable
+        # (they block Cloudflare Workers egress) and what gives a stable
+        # outbound IP. Everything not listed keeps using the relay.
+        section = config.get("upstream_proxy") or {}
+        self.upstream: UpstreamProxy | None = None
+        self._upstream_hosts = HostMatcher(())
+        self.upstream_all = bool(section.get("route_all", False))
+        if section.get("enabled") and section.get("url"):
+            try:
+                self.upstream = UpstreamProxy(section["url"])
+            except ValueError as exc:
+                log.error("Upstream proxy disabled — %s", exc)
+            else:
+                hosts = section.get("hosts")
+                if hosts is None:
+                    hosts = list(DEFAULT_AI_HOSTS)
+                self._upstream_hosts = HostMatcher(hosts)
+                log.info("Upstream exit %s for %s",
+                         self.upstream.safe_url,
+                         "all traffic" if self.upstream_all
+                         else f"{len(hosts)} host rule(s)")
 
         # Route YouTube through the relay when requested; the Google frontend
         # IP can enforce SafeSearch on the SNI-rewrite path.
@@ -801,6 +828,12 @@ class ProxyServer:
                 pass
             return
 
+        if self._use_upstream(host):
+            if await self._do_upstream_tunnel(host, port, reader, writer):
+                return
+            log.warning("Upstream failed for %s:%d — falling back to relay",
+                        host, port)
+
         if self._is_bypassed(host):
             log.info("Bypass tunnel → %s:%d (matches bypass_hosts)", host, port)
             await self._do_direct_tunnel(host, port, reader, writer)
@@ -1065,6 +1098,55 @@ class ProxyServer:
         raise OSError("; ".join(errors) or f"connect failed for {target}:{port}")
 
     # ── Direct tunnel (no MITM) ───────────────────────────────────
+
+    def _use_upstream(self, host: str) -> bool:
+        """True when this host should leave via the operator's VPS."""
+        if self.upstream is None:
+            return False
+        return self.upstream_all or self._upstream_hosts.matches(host)
+
+    async def _do_upstream_tunnel(self, host: str, port: int,
+                                  reader, writer) -> bool:
+        """Pipe the connection through the upstream SOCKS5. False = failed.
+
+        Returning False lets the caller fall back to the relay rather than
+        dropping the request: a VPS that is down should degrade the experience
+        for those hosts, not break browsing altogether.
+        """
+        try:
+            r_up, w_up = await self.upstream.connect(host, port)
+        except (UpstreamError, asyncio.IncompleteReadError, OSError,
+                asyncio.TimeoutError) as exc:
+            log.error("Upstream connect failed (%s:%d): %s", host, port, exc)
+            return False
+
+        log.info("Upstream tunnel → %s:%d via %s",
+                 host, port, self.upstream.safe_url)
+
+        async def pipe(src, dst, label):
+            try:
+                while True:
+                    data = await src.read(65536)
+                    if not data:
+                        break
+                    dst.write(data)
+                    await dst.drain()
+            except (ConnectionError, asyncio.CancelledError):
+                pass
+            except Exception as exc:
+                log.debug("Upstream pipe %s ended: %s", label, exc)
+            finally:
+                try:
+                    if not dst.is_closing():
+                        dst.close()
+                except Exception:
+                    pass
+
+        await asyncio.gather(
+            pipe(reader, w_up, f"client→{host}"),
+            pipe(r_up, writer, f"{host}→client"),
+        )
+        return True
 
     async def _do_direct_tunnel(self, host: str, port: int,
                                 reader: asyncio.StreamReader,

@@ -123,6 +123,94 @@
 
 <section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
   <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('globe', 18) }} خروجی اختصاصی — AI و IP ثابت</h2>
+    {% if upstream.enabled %}<span class="ar-pill ar-pill--on">فعال</span>
+    {% else %}<span class="ar-pill ar-pill--off">غیرفعال</span>{% endif %}
+  </div>
+
+  <div class="ar-note ar-note--warn">
+    {{ icon('info', 16) }}
+    <div>
+      <b>چرا ChatGPT با رله باز نمی‌شود؟</b> ترافیکی که از Cloudflare Workers
+      خارج می‌شود با IP رنج کلودفلر به مقصد می‌رسد و سرویس‌هایی مثل OpenAI آن
+      رنج را مسدود کرده‌اند — همان خطای «Unable to load site» با Ray ID.
+      این داخل رله قابل حل نیست؛ راهش یک <b>خروجی دیگر</b> است.
+      <br><br>
+      اسکریپت زیر را روی هر VPS ارزانی اجرا کنید تا یک SOCKS5 با رمز بالا
+      بیاورد. همان لحظه یک خط به شما می‌دهد که در کادر پایین می‌گذارید.
+      از آن به بعد فقط میزبان‌های فهرست‌شده از VPS شما خارج می‌شوند —
+      یعنی هم AI کار می‌کند، هم آن دامنه‌ها <b>IP ثابت</b> می‌گیرند.
+    </div>
+  </div>
+
+  <div class="ar-code" style="margin-top:var(--ar-s4)">
+    <div class="ar-code__bar">
+      <span class="ar-mono">روی VPS اجرا کنید</span>
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#exit-cmd"
+              data-copy-label="دستور نصب" type="button">{{ icon('copy', 13) }}</button>
+    </div>
+    <pre id="exit-cmd">curl -fsSL https://raw.githubusercontent.com/ArasTey/Aras-GP/main/scripts/install-exit-node.sh | sudo bash</pre>
+  </div>
+
+  <div class="ar-stack" style="gap:var(--ar-s4);margin-top:var(--ar-s5)">
+    <label class="ar-switch">
+      <input type="checkbox" id="up-enabled" {% if upstream.enabled %}checked{% endif %}>
+      <span class="ar-switch__track"></span>
+      <span class="ar-switch__text">
+        <b>فعال‌سازی خروجی اختصاصی</b>
+        <span>اگر VPS خاموش شود، آن میزبان‌ها خودکار به مسیر رله برمی‌گردند.</span>
+      </span>
+    </label>
+
+    <div class="ar-field">
+      <label class="ar-label" for="up-url">آدرس خروجی</label>
+      <div class="ar-input-group">
+        <input class="ar-input ar-mono" type="text" id="up-url" dir="ltr"
+               value="{{ upstream.url or '' }}"
+               placeholder="socks5://user:pass@1.2.3.4:1080" autocomplete="off">
+        <button class="ar-btn ar-btn--sm" id="up-test" type="button">
+          {{ icon('zap', 14) }}<span>تست</span>
+        </button>
+      </div>
+      <span class="ar-hint" id="up-test-result">
+        همان خطی که اسکریپت نصب چاپ می‌کند. «تست» یک درخواست واقعی می‌فرستد و
+        IP خروجی را نشان می‌دهد.
+      </span>
+    </div>
+
+    <label class="ar-switch">
+      <input type="checkbox" id="up-all" {% if upstream.route_all %}checked{% endif %}>
+      <span class="ar-switch__track"></span>
+      <span class="ar-switch__text">
+        <b>کل ترافیک از این خروجی</b>
+        <span>
+          پیش‌فرض خاموش. روشن‌کردن یعنی رله GAS دور زده می‌شود و همه‌چیز از
+          VPS می‌رود — سریع‌تر، ولی امنیت Domain Fronting را ندارد.
+        </span>
+      </span>
+    </label>
+
+    <div class="ar-field">
+      <label class="ar-label" for="up-hosts">میزبان‌هایی که از این خروجی می‌روند</label>
+      <textarea class="ar-textarea ar-ltr" id="up-hosts" rows="6" spellcheck="false"
+                >{{ (upstream.hosts or default_ai_hosts)|join('\n') }}</textarea>
+      <span class="ar-hint">
+        هر دامنه در یک خط. زیردامنه‌ها خودکار شامل می‌شوند
+        (<span class="ar-mono ar-ltr">openai.com</span> یعنی
+        <span class="ar-mono ar-ltr">chat.openai.com</span> هم).
+      </span>
+    </div>
+
+    <div class="ar-row ar-row--end">
+      <button class="ar-btn ar-btn--primary" id="up-save" type="button">
+        {{ icon('save', 15) }}<span>ذخیره‌ی خروجی</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
     <h2 class="ar-card__title">{{ icon('save', 18) }} پشتیبان‌گیری و داده‌ها</h2>
   </div>
   <p class="ar-card__sub">
@@ -257,6 +345,34 @@
 (function () {
   document.querySelectorAll("[data-epoch]").forEach(function (node) {
     if (node.dataset.epoch) node.textContent = Aras.dateTime(node.dataset.epoch);
+  });
+
+  /* upstream exit */
+  Aras.action(document.getElementById("up-test"), function () {
+    var out = document.getElementById("up-test-result");
+    return Aras.post("/api/upstream/test", {
+      url: document.getElementById("up-url").value.trim()
+    }).then(function (data) {
+      if (data.ok) {
+        out.innerHTML = '<span class="ar-pill ar-pill--on">سالم</span> ' +
+          "IP خروجی: <b class='ar-mono ar-ltr'>" + Aras.escape(data.ip) +
+          "</b> — " + data.ms + " میلی‌ثانیه";
+        Aras.toast("خروجی سالم است.", "success");
+      } else {
+        out.innerHTML = '<span class="ar-pill ar-pill--bad">ناموفق</span> ' +
+          Aras.escape(data.error || "");
+        Aras.toast(data.error || "تست ناموفق بود.", "error", 8000);
+      }
+    });
+  });
+
+  Aras.action(document.getElementById("up-save"), function () {
+    return Aras.post("/api/upstream/save", {
+      enabled: document.getElementById("up-enabled").checked ? "1" : "",
+      route_all: document.getElementById("up-all").checked ? "1" : "",
+      url: document.getElementById("up-url").value.trim(),
+      hosts: document.getElementById("up-hosts").value
+    }).then(function (data) { Aras.report(data); });
   });
 
   /* backup restore */
