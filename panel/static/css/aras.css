@@ -813,6 +813,15 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; letter-spacing: -0.015em; line-hei
   tab-size: 2;
 }
 
+/* Shell commands must never need a sideways scroll: the operator has to be
+   able to read what they are about to run as root. Source listings keep
+   `pre` so their own indentation stays meaningful. */
+.ar-code--cmd pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* ── log stream ───────────────────────────────────────────────────── */
 
 .ar-logs {

@@ -594,10 +594,17 @@ def _cert_common_name() -> str:
 
 
 def macos_trust_command() -> str:
-    """The exact command that makes the CA trusted for browsers on macOS."""
+    """The command that makes the CA trusted for browsers on macOS.
+
+    Split over three lines with shell continuations: as one string it is 115
+    characters, which overflows the status card and forces the operator to
+    scroll a code block sideways to read the command they are about to run.
+    Backslash continuations paste and execute identically.
+    """
     return (
-        "sudo security add-trusted-cert -d -r trustRoot "
-        f"-k /Library/Keychains/System.keychain {CA_CERT_FILE}"
+        "sudo security add-trusted-cert -d -r trustRoot \\\n"
+        "  -k /Library/Keychains/System.keychain \\\n"
+        f"  {CA_CERT_FILE}"
     )
 
 
