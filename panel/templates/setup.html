@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}راه‌اندازی اولیه — پنل Aras-GP{% endblock %}
+
+{% block body %}
+<main class="ar-auth">
+  <div class="ar-card ar-auth__box ar-reveal">
+    <div class="ar-brand">
+      <img class="ar-brand__mark" src="{{ url_for('static', filename='brand/aras-mark.svg') }}"
+           alt="Aras-GP" width="58" height="58">
+    </div>
+
+    <h1 class="ar-auth__title">اولین اجرا</h1>
+    <p class="ar-auth__desc">
+      یک رمز عبور برای پنل انتخاب کنید. این رمز به‌صورت هش‌شده (PBKDF2)
+      ذخیره می‌شود و هرگز به‌صورت متن ساده روی دیسک نوشته نمی‌شود.
+    </p>
+
+    <form class="ar-auth__form" method="post" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="ar-field">
+        <label class="ar-label" for="password">{{ icon('key', 15) }} رمز عبور جدید</label>
+        <input class="ar-input" type="password" id="password" name="password"
+               minlength="10" required autofocus dir="ltr"
+               autocomplete="new-password">
+        <span class="ar-hint">حداقل ۱۰ کاراکتر.</span>
+      </div>
+
+      <div class="ar-field">
+        <label class="ar-label" for="confirm">{{ icon('check', 15) }} تکرار رمز</label>
+        <input class="ar-input" type="password" id="confirm" name="confirm"
+               minlength="10" required dir="ltr" autocomplete="new-password">
+      </div>
+
+      <button class="ar-btn ar-btn--primary ar-btn--block" type="submit">
+        {{ icon('shield', 16) }}<span>ثبت و ورود</span>
+      </button>
+    </form>
+
+    <div class="ar-note ar-note--info" style="margin-top:var(--ar-s6);text-align:start">
+      {{ icon('info', 16) }}
+      <div>
+        پنل به‌صورت پیش‌فرض فقط روی <span class="ar-mono ar-ltr">127.0.0.1</span>
+        گوش می‌دهد. اگر آن را روی شبکه باز کردید، حتماً پشت VPN یا یک
+        reverse proxy با TLS و احراز هویت قرارش دهید.
+      </div>
+    </div>
+  </div>
+</main>
+{% endblock %}

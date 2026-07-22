@@ -1,0 +1,343 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}کاربران — پنل Aras-GP{% endblock %}
+
+{% block content %}
+<header class="ar-page__head">
+  <div>
+    <h1 class="ar-page__title">کاربران پروکسی</h1>
+    <p class="ar-page__desc">
+      احراز هویت واقعی به‌ازای هر اتصال: Basic Auth روی پروکسی HTTP و
+      نام‌کاربری/رمز (RFC 1929) روی SOCKS5، با شمارش بایت جداگانه برای هر کاربر
+      و قطع خودکار در سقف سهمیه.
+    </p>
+  </div>
+  <button class="ar-btn ar-btn--primary" data-modal-open="modal-user" type="button"
+          {% if not has_config %}disabled{% endif %}>
+    {{ icon('user-plus', 16) }}<span>کاربر جدید</span>
+  </button>
+</header>
+
+{% if not has_config %}
+<div class="ar-note ar-note--warn ar-reveal">
+  {{ icon('alert', 18) }}
+  <div>
+    برای مدیریت کاربران ابتدا باید <span class="ar-mono ar-ltr">config.json</span> ساخته شود.
+    به <a href="{{ url_for('config_page') }}">ساخت کانفیگ</a> بروید.
+  </div>
+</div>
+{% else %}
+
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-row ar-row--between">
+    <label class="ar-switch">
+      <input type="checkbox" id="auth-toggle" {% if auth_enabled %}checked{% endif %}>
+      <span class="ar-switch__track"></span>
+      <span class="ar-switch__text">
+        <b>الزام احراز هویت روی پروکسی</b>
+        <span>
+          وقتی خاموش است، پروکسی مثل حالت شخصی و بدون رمز کار می‌کند —
+          دقیقاً همان رفتار اصلی پروژه.
+        </span>
+      </span>
+    </label>
+    <span class="ar-row" style="gap:var(--ar-s2)">
+      {% if auth_enabled %}
+        <span class="ar-pill ar-pill--on">{{ icon('lock', 13) }} فعال</span>
+      {% else %}
+        <span class="ar-pill ar-pill--off">{{ icon('unlock', 13) }} غیرفعال</span>
+      {% endif %}
+    </span>
+  </div>
+
+  {% if lan_sharing and not auth_enabled %}
+  <div class="ar-note ar-note--bad" style="margin-top:var(--ar-s4)">
+    {{ icon('alert', 16) }}
+    <div>
+      <b>هشدار امنیتی:</b> اشتراک‌گذاری LAN روشن است ولی احراز هویت خاموش.
+      پروکسی روی <span class="ar-mono ar-ltr">0.0.0.0</span> باز است و
+      هر دستگاهی در شبکه می‌تواند بدون رمز از آن استفاده کند.
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="ar-note ar-note--info" style="margin-top:var(--ar-s4)">
+    {{ icon('info', 16) }}
+    <div>
+      <b>تنظیمات سمت کاربر:</b>
+      پروکسی HTTP روی <span class="ar-mono ar-ltr">{{ settings.http_host }}:{{ settings.http_port }}</span>
+      {% if settings.socks5_enabled %}
+        و SOCKS5 روی <span class="ar-mono ar-ltr">{{ settings.http_host }}:{{ settings.socks5_port }}</span>
+      {% endif %}
+      — با همان نام کاربری و رمزی که اینجا می‌سازید.
+      تغییر کاربران بلافاصله روی رله در حال اجرا اعمال می‌شود و نیازی به ری‌استارت ندارد.
+    </div>
+  </div>
+</section>
+
+<section class="ar-card ar-reveal">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('users', 18) }} فهرست کاربران</h2>
+    <span class="ar-hint" id="users-summary"></span>
+  </div>
+
+  <div class="ar-table-wrap">
+    <table class="ar-table">
+      <thead>
+        <tr>
+          <th>کاربر</th>
+          <th>وضعیت</th>
+          <th>مصرف / سهمیه</th>
+          <th>اتصال</th>
+          <th>انقضا</th>
+          <th>آخرین فعالیت</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="users-body">
+        <tr><td colspan="7"><div class="ar-empty">{{ icon('users', 28) }}
+          <b>در حال بارگذاری…</b></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<!-- ── مودال افزودن/ویرایش ── -->
+<div class="ar-modal" id="modal-user" hidden>
+  <div class="ar-card ar-modal__box">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('user-plus', 18) }} <span id="modal-title">کاربر جدید</span></h2>
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-modal-close="modal-user"
+              type="button">{{ icon('x', 16) }}</button>
+    </div>
+
+    <div class="ar-stack" style="gap:var(--ar-s4)">
+      <div class="ar-field">
+        <label class="ar-label" for="u-name">نام کاربری</label>
+        <input class="ar-input ar-mono" type="text" id="u-name" dir="ltr"
+               placeholder="ali" autocomplete="off">
+        <span class="ar-hint">۳ تا ۳۲ کاراکتر: حروف انگلیسی، عدد، نقطه، خط تیره.</span>
+      </div>
+
+      <div class="ar-field">
+        <label class="ar-label" for="u-pass">رمز عبور</label>
+        <div class="ar-input-group">
+          <input class="ar-input ar-mono" type="text" id="u-pass" dir="ltr"
+                 autocomplete="off" spellcheck="false">
+          <button class="ar-btn ar-btn--sm" id="u-gen" type="button"
+                  title="تولید رمز">{{ icon('refresh', 14) }}</button>
+          <button class="ar-btn ar-btn--sm" data-copy="#u-pass" data-copy-label="رمز"
+                  type="button">{{ icon('copy', 14) }}</button>
+        </div>
+        <span class="ar-hint">
+          حداقل ۸ کاراکتر. به‌صورت PBKDF2 ذخیره می‌شود؛ بعد از ذخیره دیگر قابل بازیابی نیست،
+          پس همین حالا کپی کنید. هنگام ویرایش، خالی گذاشتن یعنی «رمز را عوض نکن».
+        </span>
+      </div>
+
+      <div class="ar-grid ar-grid--2">
+        <div class="ar-field">
+          <label class="ar-label" for="u-quota">سهمیه (گیگابایت)</label>
+          <input class="ar-input ar-num" type="number" id="u-quota" min="0" step="0.5"
+                 value="0" dir="ltr">
+          <span class="ar-hint">۰ یعنی نامحدود.</span>
+        </div>
+        <div class="ar-field">
+          <label class="ar-label" for="u-expires">تاریخ انقضا</label>
+          <input class="ar-input ar-num" type="date" id="u-expires" dir="ltr">
+          <span class="ar-hint">خالی یعنی بدون انقضا.</span>
+        </div>
+      </div>
+
+      <div class="ar-field">
+        <label class="ar-label" for="u-note">یادداشت</label>
+        <input class="ar-input" type="text" id="u-note" placeholder="مثلاً: موبایل خودم">
+      </div>
+
+      <div class="ar-row ar-row--end">
+        <button class="ar-btn" data-modal-close="modal-user" type="button">انصراف</button>
+        <button class="ar-btn ar-btn--primary" id="u-submit" type="button">
+          {{ icon('save', 15) }}<span>ذخیره</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  var body = document.getElementById("users-body");
+  if (!body) return;
+
+  var summary = document.getElementById("users-summary");
+  var editing = null;
+
+  var STATUS = {
+    active:   ["ar-pill--on",   "فعال"],
+    idle:     ["ar-pill--off",  "بی‌کار"],
+    disabled: ["ar-pill--off",  "غیرفعال"],
+    quota:    ["ar-pill--bad",  "سهمیه تمام"],
+    expired:  ["ar-pill--warn", "منقضی"]
+  };
+
+  function quotaCell(user) {
+    var used = Aras.bytesText(user.used_bytes);
+    if (!user.quota_bytes) {
+      return '<div class="ar-num">' + used + '</div>' +
+             '<div class="ar-hint">نامحدود</div>';
+    }
+    var percent = user.percent || 0;
+    var tone = percent >= 100 ? " ar-meter__fill--bad" : (percent >= 80 ? " ar-meter__fill--warn" : "");
+    return '<div class="ar-num">' + used + " از " + Aras.bytesText(user.quota_bytes) + "</div>" +
+           '<div class="ar-meter" style="margin-top:5px"><div class="ar-meter__fill' + tone +
+           '" style="width:' + Math.min(100, percent) + '%"></div></div>';
+  }
+
+  function render(list) {
+    if (!list.length) {
+      body.innerHTML = '<tr><td colspan="7"><div class="ar-empty">' +
+        '<b>هنوز کاربری تعریف نشده</b>' +
+        "<span>با دکمه‌ی «کاربر جدید» اولین حساب را بسازید.</span></div></td></tr>";
+      summary.textContent = "";
+      return;
+    }
+
+    body.innerHTML = list.map(function (user) {
+      var badge = STATUS[user.status] || STATUS.idle;
+      var expires = user.expires_at
+        ? (typeof user.expires_at === "number" ? Aras.dateTime(user.expires_at)
+                                               : Aras.escape(user.expires_at))
+        : "—";
+      return "<tr>" +
+        "<td><b class='ar-mono ar-ltr'>" + Aras.escape(user.username) + "</b>" +
+          (user.note ? "<div class='ar-hint'>" + Aras.escape(user.note) + "</div>" : "") + "</td>" +
+        '<td><span class="ar-pill ' + badge[0] + '">' + badge[1] + "</span></td>" +
+        "<td>" + quotaCell(user) + "</td>" +
+        '<td class="ar-num">' + Aras.number(user.connections) + "</td>" +
+        '<td class="ar-num">' + expires + "</td>" +
+        '<td class="ar-hint">' + Aras.ago(user.last_seen) + "</td>" +
+        '<td><div class="ar-row" style="gap:4px;flex-wrap:nowrap">' +
+          '<button class="ar-btn ar-btn--sm" data-edit="' + Aras.escape(user.username) + '">ویرایش</button>' +
+          '<button class="ar-btn ar-btn--sm" data-toggle="' + Aras.escape(user.username) + '" ' +
+            'data-enabled="' + (user.enabled ? "1" : "0") + '">' +
+            (user.enabled ? "غیرفعال" : "فعال") + "</button>" +
+          '<button class="ar-btn ar-btn--sm" data-reset="' + Aras.escape(user.username) + '">صفر کردن</button>' +
+          '<button class="ar-btn ar-btn--sm ar-btn--danger" data-del="' +
+            Aras.escape(user.username) + '">حذف</button>' +
+        "</div></td></tr>";
+    }).join("");
+
+    var online = list.filter(function (u) { return u.connections > 0; }).length;
+    summary.textContent = Aras.number(list.length) + " کاربر — " +
+                          Aras.number(online) + " متصل";
+    window.__arasUsers = list;
+  }
+
+  function refresh() {
+    return Aras.api("/api/users").then(function (data) {
+      if (data.ok) render(data.users || []);
+    });
+  }
+
+  refresh();
+  setInterval(refresh, 7000);
+
+  /* ── auth toggle ── */
+  var authToggle = document.getElementById("auth-toggle");
+  authToggle.addEventListener("change", function () {
+    Aras.post("/api/users/auth-toggle", { enabled: authToggle.checked ? "1" : "" })
+      .then(function (data) {
+        if (!Aras.report(data)) { authToggle.checked = !authToggle.checked; return; }
+        setTimeout(function () { location.reload(); }, 900);
+      });
+  });
+
+  /* ── modal ── */
+  function openModal(user) {
+    editing = user ? user.username : null;
+    document.getElementById("modal-title").textContent = user ? "ویرایش کاربر" : "کاربر جدید";
+    document.getElementById("u-name").value = user ? user.username : "";
+    document.getElementById("u-name").disabled = !!user;
+    document.getElementById("u-pass").value = "";
+    document.getElementById("u-quota").value = user
+      ? (user.quota_bytes / (1024 * 1024 * 1024)).toFixed(2).replace(/\.00$/, "") : "0";
+    document.getElementById("u-expires").value =
+      user && typeof user.expires_at === "string" ? user.expires_at.slice(0, 10) : "";
+    document.getElementById("u-note").value = user ? (user.note || "") : "";
+    Aras.modal.open("modal-user");
+  }
+
+  document.querySelector("[data-modal-open='modal-user']")
+    .addEventListener("click", function () { openModal(null); });
+
+  document.getElementById("u-gen").addEventListener("click", function () {
+    var bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    var alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    document.getElementById("u-pass").value = Array.prototype.map.call(bytes, function (b) {
+      return alphabet[b % alphabet.length];
+    }).join("");
+  });
+
+  Aras.action(document.getElementById("u-submit"), function () {
+    var payload = {
+      username: document.getElementById("u-name").value.trim(),
+      password: document.getElementById("u-pass").value,
+      quota_gb: document.getElementById("u-quota").value,
+      expires_at: document.getElementById("u-expires").value,
+      note: document.getElementById("u-note").value
+    };
+    var url = editing ? "/api/users/update" : "/api/users/add";
+    if (editing) payload.username = editing;
+    return Aras.post(url, payload).then(function (data) {
+      if (!Aras.report(data, editing ? "کاربر به‌روزرسانی شد." : "کاربر ساخته شد.")) return;
+      Aras.modal.close("modal-user");
+      render(data.users || []);
+    });
+  });
+
+  /* ── row actions ── */
+  document.addEventListener("click", function (event) {
+    var edit = event.target.closest("[data-edit]");
+    if (edit) {
+      var found = (window.__arasUsers || []).filter(function (u) {
+        return u.username === edit.dataset.edit;
+      })[0];
+      if (found) openModal(found);
+      return;
+    }
+
+    var toggle = event.target.closest("[data-toggle]");
+    if (toggle) {
+      Aras.post("/api/users/update", {
+        username: toggle.dataset.toggle,
+        enabled: toggle.dataset.enabled === "1" ? "" : "1"
+      }).then(function (data) {
+        if (Aras.report(data, "وضعیت کاربر تغییر کرد.")) render(data.users || []);
+      });
+      return;
+    }
+
+    var reset = event.target.closest("[data-reset]");
+    if (reset) {
+      Aras.post("/api/users/reset-usage", { username: reset.dataset.reset })
+        .then(function (data) {
+          if (Aras.report(data, "مصرف صفر شد.")) render(data.users || []);
+        });
+      return;
+    }
+
+    var del = event.target.closest("[data-del]");
+    if (del) {
+      if (!confirm("کاربر «" + del.dataset.del + "» حذف شود؟ اتصال‌های بازش بسته می‌شوند.")) return;
+      Aras.post("/api/users/delete", { username: del.dataset.del }).then(function (data) {
+        if (Aras.report(data, "کاربر حذف شد.")) render(data.users || []);
+      });
+    }
+  });
+})();
+</script>
+{% endblock %}

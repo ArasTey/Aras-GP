@@ -1,0 +1,57 @@
+{# ---------------------------------------------------------------------
+   Inline SVG icon set.
+
+   Deliberately not Font Awesome or any icon font: the panel must render
+   with zero network requests (see panel/README.md — a censorship tool
+   that pulls assets from a CDN leaks the fact that it is running). These
+   are drawn on the same 24×24 grid with a 2px stroke so they sit
+   consistently next to the type scale.
+   --------------------------------------------------------------------- #}
+
+{% set ARAS_ICONS = {
+  'gauge':    '<path d="M12 21a9 9 0 1 0-9-9"/><path d="M3 12h3M12 3v3M20.5 7.5 18 10M21 12h-3"/><path d="m12 12 5-3"/><circle cx="12" cy="12" r="1.6"/>',
+  'rocket':   '<path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.8-.9.7-2.2-.1-3s-2.1-.8-2.9 0z"/><path d="M12 15 9 12a11 11 0 0 1 2-6.6C13.4 2.2 17.3 2 21 3c1 3.7.8 7.6-2.4 10A11 11 0 0 1 12 15z"/><path d="M9 12H6c-.6 0-.9-.6-.6-1.1l2-3A1 1 0 0 1 8.3 7.5H11"/><path d="M12 15v3c0 .6.6.9 1.1.6l3-2c.3-.2.5-.6.5-.9V13"/>',
+  'sliders':  '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>',
+  'users':    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  'gear':     '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  'pulse':    '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  'power':    '<path d="M18.4 6.6a9 9 0 1 1-12.8 0"/><path d="M12 2v10"/>',
+  'play':     '<path d="M6 4.5 20 12 6 19.5z"/>',
+  'stop':     '<rect x="5" y="5" width="14" height="14" rx="2.5"/>',
+  'refresh':  '<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/>',
+  'shield':   '<path d="M12 22s8-4 8-10V5.5L12 2 4 5.5V12c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+  'key':      '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.6-8.6M17 6l2.5 2.5M14.5 8.5 17 11"/>',
+  'copy':     '<rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  'check':    '<path d="M20 6 9 17l-5-5"/>',
+  'alert':    '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  'info':     '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+  'link':     '<path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.5 3.5l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3A5 5 0 0 0 10.5 20.5l1.7-1.7"/>',
+  'globe':    '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/>',
+  'download': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>',
+  'trash':    '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6"/>',
+  'plus':     '<path d="M12 5v14M5 12h14"/>',
+  'logout':   '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+  'menu':     '<path d="M3 6h18M3 12h18M3 18h18"/>',
+  'chart':    '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M7 15l4-5 3 3 5-7"/>',
+  'clock':    '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  'server':   '<rect x="2.5" y="3" width="19" height="7" rx="2"/><rect x="2.5" y="14" width="19" height="7" rx="2"/><path d="M6.5 6.5h.01M6.5 17.5h.01"/>',
+  'lock':     '<rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>',
+  'unlock':   '<rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7a4 4 0 0 1 7.5-2"/>',
+  'wifi':     '<path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5.5 5.5 0 0 1 7 0"/><path d="M2 9a15 15 0 0 1 20 0"/><path d="M12 20h.01"/>',
+  'zap':      '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  'x':        '<path d="M18 6 6 18M6 6l12 12"/>',
+  'cloud':    '<path d="M17.5 19a4.5 4.5 0 0 0 .5-9 6 6 0 0 0-11.6-1.6A4.2 4.2 0 0 0 7 19z"/>',
+  'code':     '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
+  'eye':      '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  'file':     '<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/>',
+  'save':     '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+  'user-plus':'<path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
+  'ban':      '<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
+  'arrow':    '<path d="M19 12H5M12 19l-7-7 7-7"/>'
+} %}
+
+{% macro icon(name, size=18, cls='') -%}
+<svg class="ar-i {{ cls }}" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24"
+     fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"
+     stroke-linejoin="round" aria-hidden="true" focusable="false">{{ ARAS_ICONS.get(name, ARAS_ICONS['info'])|safe }}</svg>
+{%- endmacro %}

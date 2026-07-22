@@ -1,0 +1,144 @@
+ARAS-GP PANEL — PROPRIETARY LICENCE
+پروانه‌ی اختصاصی پنل Aras-GP
+Version 1.0
+
+--------------------------------------------------------------------------
+SCOPE / دامنه‌ی شمول
+--------------------------------------------------------------------------
+
+This licence governs ONLY the contents of the `panel/` directory (the
+"Panel"): its Python modules, HTML templates, CSS, JavaScript, and the
+Aras-GP brand assets under `panel/static/brand/`.
+
+It does NOT apply to the relay engine. The files under `src/`, `deploy/`,
+`main.py` and `setup.py` — including `src/account_manager.py` and the
+modifications made to `src/proxy_server.py` for per-user authentication —
+remain under the MIT licence stated in the repository root `LICENSE` file,
+because they are derived from MIT-licensed code. Nothing in this document
+attempts to revoke or narrow that grant.
+
+این پروانه فقط شامل محتویات پوشه‌ی `panel/` است. موتور رله زیر `src/` و
+`deploy/` همچنان تحت پروانه‌ی MIT مندرج در فایل `LICENSE` ریشه‌ی مخزن باقی
+می‌ماند.
+
+--------------------------------------------------------------------------
+1. GRANT / اعطای حق استفاده
+--------------------------------------------------------------------------
+
+Subject to the restrictions below, the copyright holder grants you a
+non-exclusive, non-transferable, revocable licence to:
+
+  (a) install and run the Panel for your own personal or internal
+      organisational use;
+  (b) modify the Panel's source for that same use;
+  (c) inspect, audit, and security-test any part of the Panel.
+
+Right (c) is granted unconditionally and may not be waived. The Panel ships
+unobfuscated on purpose: software used to circumvent censorship must be
+auditable by the people whose safety depends on it.
+
+--------------------------------------------------------------------------
+2. RESTRICTIONS / محدودیت‌ها
+--------------------------------------------------------------------------
+
+Without prior WRITTEN permission from the copyright holder, you may NOT:
+
+  2.1  Remove, replace, obscure, or alter the Aras-GP branding — including
+       the name "Aras-GP", the SVG mark in `panel/static/brand/`, the
+       wordmark, the colour system, or the attribution in the footer — in
+       any copy you distribute or make available to a third party.
+
+  2.2  Rebrand the Panel, or present it (in whole or in substantial part)
+       under a different product name or identity.
+
+  2.3  Sell, resell, sublicense, rent, lease, or otherwise commercially
+       distribute the Panel or any derivative of it, whether standalone,
+       bundled, or as part of a hosted service offered to third parties.
+
+  2.4  Redistribute the Panel publicly (including uploading it to a public
+       repository, marketplace, or file-sharing service) in modified form.
+
+  2.5  Remove or weaken the security controls in Section 4, or the
+       disclaimer displayed in the Panel's footer.
+
+بدون اجازه‌ی کتبی، حذف یا تغییر برندینگ، ری‌برندسازی، و فروش مجدد ممنوع است.
+
+--------------------------------------------------------------------------
+3. PERMITTED WITHOUT PERMISSION / موارد مجاز بدون اجازه
+--------------------------------------------------------------------------
+
+For clarity, the following are always permitted:
+
+  3.1  Running an unlimited number of private instances for yourself, your
+       family, or your organisation's own users.
+
+  3.2  Publishing security research, vulnerability reports, or code review
+       of the Panel, including quoting the source as needed.
+
+  3.3  Sharing unmodified copies privately with individuals, provided the
+       branding and this licence file travel with them.
+
+  3.4  Charging your own end users for a proxy service you operate using
+       the Panel — the restriction in 2.3 covers selling the software, not
+       operating it.
+
+--------------------------------------------------------------------------
+4. SECURITY AND PRIVACY COVENANTS / تعهدات امنیتی
+--------------------------------------------------------------------------
+
+The copyright holder commits, for as long as this licence is in force, that
+the Panel will NOT contain:
+
+  4.1  any telemetry, analytics, beacon, or phone-home mechanism that
+       transmits user identity, IP addresses, traffic statistics, or
+       configuration to the copyright holder or any third party;
+
+  4.2  any remote kill switch, remote disablement, or remote configuration
+       channel affecting a user's installation;
+
+  4.3  any obfuscated, packed, or deliberately unreadable code that would
+       impede independent security auditing;
+
+  4.4  any licence-enforcement mechanism requiring network contact. The
+       optional licence gate in `panel/licensing.py` verifies an Ed25519
+       signature entirely offline and makes no network request of any kind.
+
+These are commitments of the licensor to the licensee, not restrictions on
+the licensee. If any future version of the Panel violates them, that version
+is not covered by this licence.
+
+این تعهدات به این دلیل وجود دارند که این ابزار برای عبور از سانسور و نظارت
+ساخته شده است؛ هر سازوکار پنهانِ ارتباط با یک سرور مرکزی، دقیقاً همان خطری را
+ایجاد می‌کند که این پروژه قرار است از آن محافظت کند.
+
+--------------------------------------------------------------------------
+5. TERMINATION / فسخ
+--------------------------------------------------------------------------
+
+This licence terminates automatically if you breach Section 2. Upon
+termination you must cease distribution and destroy all distributed copies.
+Your right to inspect and audit under 1(c) and 3.2 survives termination.
+
+--------------------------------------------------------------------------
+6. NO WARRANTY / عدم ضمانت
+--------------------------------------------------------------------------
+
+THE PANEL IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE PANEL OR ITS USE.
+
+You are solely responsible for complying with all applicable local,
+national, and international law, and with the terms of service of any third
+party platform (including Google and Cloudflare) that you use with it.
+
+--------------------------------------------------------------------------
+7. CONTACT / تماس
+--------------------------------------------------------------------------
+
+For written permission under Section 2, contact the copyright holder listed
+in the repository metadata.
+
+Copyright (c) 2026 — Aras-GP. All rights reserved.

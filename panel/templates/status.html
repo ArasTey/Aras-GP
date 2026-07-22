@@ -1,0 +1,258 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}وضعیت — پنل Aras-GP{% endblock %}
+
+{% block content %}
+<header class="ar-page__head">
+  <div>
+    <h1 class="ar-page__title">وضعیت سامانه</h1>
+    <p class="ar-page__desc">
+      همه‌ی چیزهایی که باید قبل از اعلام «کار می‌کند» بررسی شوند: اجرای رله،
+      آخرین اتصال موفق به زنجیره‌ی GAS/Worker، و اعتماد سیستم‌عامل به گواهی CA.
+    </p>
+  </div>
+  <div class="ar-row">
+    <button class="ar-btn ar-btn--sm" id="btn-test">{{ icon('zap', 15) }}<span>تست اتصال</span></button>
+    <button class="ar-btn ar-btn--sm" id="btn-restart">{{ icon('refresh', 15) }}<span>راه‌اندازی مجدد</span></button>
+  </div>
+</header>
+
+<section class="ar-grid ar-grid--3" style="margin-bottom:var(--ar-s5)">
+  <!-- اجرای رله -->
+  <article class="ar-card ar-card--hover ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title" style="font-size:var(--ar-t-md)">
+        {{ icon('power', 17) }} موتور رله
+      </h2>
+      <span class="ar-dot {% if status.running %}ar-dot--live{% else %}ar-dot--bad{% endif %}"></span>
+    </div>
+    <div class="ar-stack" style="gap:var(--ar-s3)">
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">وضعیت</span>
+        <span class="ar-pill {% if status.running %}ar-pill--on{% else %}ar-pill--off{% endif %}">
+          {{ 'در حال اجرا' if status.running else 'متوقف' }}
+        </span>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">مدت اجرا</span>
+        <b id="s-uptime" class="ar-num">—</b>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">پروکسی HTTP</span>
+        <b class="ar-mono ar-ltr">{{ status.listen_host }}:{{ status.listen_port }}</b>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">SOCKS5</span>
+        <b class="ar-mono ar-ltr">
+          {{ (status.listen_host ~ ':' ~ status.socks5_port) if status.socks5_enabled else 'غیرفعال' }}
+        </b>
+      </div>
+      {% if status.running and status.socks5_enabled and not status.socks5_active %}
+      <div class="ar-note ar-note--warn" style="margin-top:var(--ar-s2)">
+        {{ icon('alert', 15) }}
+        <div>
+          شنونده‌ی SOCKS5 بالا نیامد — پورت
+          <span class="ar-mono ar-ltr">{{ status.socks5_port }}</span>
+          احتمالاً در اختیار برنامه‌ی دیگری است. پروکسی HTTP سالم کار می‌کند.
+        </div>
+      </div>
+      {% endif %}
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">احراز هویت کاربران</span>
+        {% if status.auth_required %}
+          <span class="ar-pill ar-pill--on">{{ icon('lock', 12) }} فعال</span>
+        {% else %}
+          <span class="ar-pill ar-pill--off">{{ icon('unlock', 12) }} غیرفعال</span>
+        {% endif %}
+      </div>
+      {% if status.last_error %}
+      <div class="ar-note ar-note--bad" style="margin-top:var(--ar-s2)">
+        {{ icon('alert', 15) }}
+        <div class="ar-mono ar-ltr" style="font-size:12px">{{ status.last_error }}</div>
+      </div>
+      {% endif %}
+    </div>
+  </article>
+
+  <!-- زنجیره‌ی رله -->
+  <article class="ar-card ar-card--hover ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title" style="font-size:var(--ar-t-md)">
+        {{ icon('link', 17) }} زنجیره‌ی GAS / Worker
+      </h2>
+    </div>
+    <div class="ar-stack" style="gap:var(--ar-s3)">
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">آخرین فعالیت موفق</span>
+        <b id="s-last-success">—</b>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">تعداد اسکریپت</span>
+        <b class="ar-num">{{ status.script_count }}</b>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">اسکریپت‌های بلاک‌شده</span>
+        <b id="s-blacklist" class="ar-num">0</b>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">دامنه‌ی فرانت</span>
+        <b class="ar-mono ar-ltr">{{ status.front_domain }}</b>
+      </div>
+      <div id="s-probe" class="ar-hint">
+        برای پاسخ قطعی، دکمه‌ی «تست اتصال» یک درخواست واقعی از همان مسیر ترافیک عادی می‌فرستد.
+      </div>
+    </div>
+  </article>
+
+  <!-- گواهی CA -->
+  <article class="ar-card ar-card--hover ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title" style="font-size:var(--ar-t-md)">
+        {{ icon('shield', 17) }} گواهی CA
+      </h2>
+      <span class="ar-dot {% if status.ca_trusted %}ar-dot--live{% elif status.ca_present %}ar-dot--warn{% else %}ar-dot--bad{% endif %}"></span>
+    </div>
+    <div class="ar-stack" style="gap:var(--ar-s3)">
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">ساخته شده</span>
+        <span class="ar-pill {% if status.ca_present %}ar-pill--on{% else %}ar-pill--off{% endif %}">
+          {{ 'بله' if status.ca_present else 'خیر' }}
+        </span>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">مورد اعتماد سیستم</span>
+        <span class="ar-pill {% if status.ca_trusted %}ar-pill--on{% else %}ar-pill--warn{% endif %}"
+              id="s-ca">
+          {{ 'بله' if status.ca_trusted else 'خیر' }}
+        </span>
+      </div>
+      <div class="ar-hint ar-mono ar-ltr" style="font-size:11px;word-break:break-all">
+        {{ status.ca_path }}
+      </div>
+      <div class="ar-row" style="gap:var(--ar-s2)">
+        <button class="ar-btn ar-btn--sm ar-btn--primary" id="btn-ca">
+          {{ icon('shield', 14) }}<span>نصب گواهی</span>
+        </button>
+        <a class="ar-btn ar-btn--sm" href="{{ url_for('api_ca_download') }}">
+          {{ icon('download', 14) }}<span>دانلود</span>
+        </a>
+      </div>
+      <span class="ar-hint">
+        این گواهی فقط برای رمزگشایی ترافیک مرورگر <b>خودتان</b> روی همین دستگاه است.
+        اگر نصب خودکار نشد: <span class="ar-mono ar-ltr">python main.py --install-cert</span>
+        با دسترسی مدیر.
+      </span>
+    </div>
+  </article>
+</section>
+
+<section class="ar-card ar-reveal">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('code', 18) }} لاگ زنده‌ی رله</h2>
+    <div class="ar-row" style="gap:var(--ar-s2)">
+      <select class="ar-select ar-btn--sm" id="log-level" style="width:auto;padding-block:6px">
+        <option value="">همه</option>
+        <option value="INFO">INFO</option>
+        <option value="WARNING">WARNING</option>
+        <option value="ERROR">ERROR</option>
+        <option value="DEBUG">DEBUG</option>
+      </select>
+      <label class="ar-switch" title="دنبال‌کردن انتهای لاگ">
+        <input type="checkbox" id="log-follow" checked>
+        <span class="ar-switch__track"></span>
+      </label>
+      <button class="ar-btn ar-btn--sm ar-btn--danger" id="log-clear" type="button">
+        {{ icon('trash', 13) }}
+      </button>
+    </div>
+  </div>
+  <div class="ar-logs" id="logs">
+    <span class="ar-logs__line">در انتظار خروجی رله…</span>
+  </div>
+  <p class="ar-hint" style="margin-top:var(--ar-s3)">
+    این لاگ فقط در حافظه نگه داشته می‌شود (۴۰۰ سطر آخر) و روی دیسک نوشته نمی‌شود.
+    موتور رله هرگز <span class="ar-mono ar-ltr">auth_key</span> یا رمز کاربران را لاگ نمی‌کند.
+  </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  var logs = document.getElementById("logs");
+  var follow = document.getElementById("log-follow");
+  var levelPick = document.getElementById("log-level");
+
+  function refreshStatus() {
+    Aras.api("/api/stats").then(function (data) {
+      if (!data.ok) return;
+      var s = data.status;
+      document.getElementById("s-uptime").textContent =
+        s.running ? Aras.duration(s.uptime) : "متوقف";
+      document.getElementById("s-last-success").textContent = Aras.ago(s.last_success_at);
+      document.getElementById("s-blacklist").textContent =
+        Aras.number((data.blacklisted_scripts || []).length);
+    });
+  }
+
+  function refreshLogs() {
+    var query = levelPick.value ? "?level=" + encodeURIComponent(levelPick.value) : "";
+    Aras.api("/api/logs" + query).then(function (data) {
+      if (!data.ok) return;
+      if (!data.lines.length) {
+        logs.innerHTML = '<span class="ar-logs__line">هنوز چیزی ثبت نشده است.</span>';
+        return;
+      }
+      logs.innerHTML = data.lines.map(function (line) {
+        return '<span class="ar-logs__line ar-logs__line--' + line.level + '">' +
+               Aras.escape(line.text) + "</span>";
+      }).join("");
+      if (follow.checked) logs.scrollTop = logs.scrollHeight;
+    });
+  }
+
+  function tick() { refreshStatus(); refreshLogs(); }
+  tick();
+  setInterval(tick, 5000);
+  levelPick.addEventListener("change", refreshLogs);
+
+  document.getElementById("log-clear").addEventListener("click", function () {
+    Aras.post("/api/logs/clear").then(refreshLogs);
+  });
+
+  Aras.action(document.getElementById("btn-test"), function () {
+    return Aras.post("/api/relay/test").then(function (result) {
+      var probe = document.getElementById("s-probe");
+      if (result.ok) {
+        probe.innerHTML = '<span class="ar-pill ar-pill--on">مسیر سالم</span> ' +
+          "کد " + result.status + " در " + result.ms + " میلی‌ثانیه، " +
+          Aras.bytesText(result.bytes) + " دریافت شد.";
+        Aras.toast("مسیر رله سالم است.", "success");
+      } else {
+        probe.innerHTML = '<span class="ar-pill ar-pill--bad">مسیر ناسالم</span> ' +
+          Aras.escape(result.error || ("کد " + (result.status || 0)));
+        Aras.toast(result.error || "تست اتصال ناموفق بود.", "error", 7000);
+      }
+      refreshStatus();
+    });
+  });
+
+  Aras.action(document.getElementById("btn-restart"), function () {
+    return Aras.post("/api/relay/restart").then(function (result) {
+      if (Aras.report(result)) setTimeout(function () { location.reload(); }, 900);
+    });
+  });
+
+  Aras.action(document.getElementById("btn-ca"), function () {
+    return Aras.post("/api/ca/install").then(function (result) {
+      Aras.report(result);
+      return Aras.api("/api/ca/status").then(function (data) {
+        var badge = document.getElementById("s-ca");
+        badge.textContent = data.trusted ? "بله" : "خیر";
+        badge.className = "ar-pill " + (data.trusted ? "ar-pill--on" : "ar-pill--warn");
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

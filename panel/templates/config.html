@@ -1,0 +1,323 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}ساخت کانفیگ — پنل Aras-GP{% endblock %}
+
+{% macro num_field(key, label, hint='', step=1, min=0) %}
+<div class="ar-field">
+  <label class="ar-label" for="{{ key }}">{{ label }}</label>
+  <input class="ar-input ar-num" type="number" id="{{ key }}" name="{{ key }}"
+         value="{{ cfg.get(key, '') }}" step="{{ step }}" min="{{ min }}" dir="ltr">
+  {% if hint %}<span class="ar-hint">{{ hint }}</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro toggle_field(key, label, hint='') %}
+<label class="ar-switch">
+  <input type="checkbox" name="{{ key }}" {% if cfg.get(key) %}checked{% endif %}>
+  <span class="ar-switch__track"></span>
+  <span class="ar-switch__text"><b>{{ label }}</b><span>{{ hint }}</span></span>
+</label>
+{% endmacro %}
+
+{% macro list_field(key, label, hint='', rows=4) %}
+<div class="ar-field">
+  <label class="ar-label" for="{{ key }}">{{ label }}</label>
+  <textarea class="ar-textarea ar-ltr" id="{{ key }}" name="{{ key }}" rows="{{ rows }}"
+            spellcheck="false">{{ (cfg.get(key) or [])|join('\n') }}</textarea>
+  {% if hint %}<span class="ar-hint">{{ hint }}</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% block content %}
+<header class="ar-page__head">
+  <div>
+    <h1 class="ar-page__title">ساخت کانفیگ</h1>
+    <p class="ar-page__desc">
+      خروجی این فرم دقیقاً همان <span class="ar-mono ar-ltr">config.json</span> است که
+      <span class="ar-mono ar-ltr">main.py</span> می‌خواند — با همان کلیدهای
+      <span class="ar-mono ar-ltr">config.example.json</span>، بدون تغییر نام یا معنی.
+    </p>
+  </div>
+  <div class="ar-row">
+    <a class="ar-btn ar-btn--sm" href="{{ url_for('api_config_download') }}">
+      {{ icon('download', 15) }}<span>دانلود config.json</span>
+    </a>
+    <button class="ar-btn ar-btn--sm" data-modal-open="modal-profiles" type="button">
+      {{ icon('file', 15) }}<span>پروفایل‌ها</span>
+    </button>
+  </div>
+</header>
+
+{% if is_new %}
+<div class="ar-note ar-note--info ar-reveal" style="margin-bottom:var(--ar-s5)">
+  {{ icon('info', 18) }}
+  <div>
+    هنوز <span class="ar-mono ar-ltr">config.json</span> ساخته نشده است. مقادیر زیر از
+    <span class="ar-mono ar-ltr">config.example.json</span> پیش‌پر شده‌اند؛ فقط
+    <b>auth_key</b> و <b>Deployment ID</b> را پر کنید و ذخیره بزنید.
+  </div>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('config_save') }}" class="ar-stack" id="config-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <!-- ── هویت رله ── -->
+  <section class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('shield', 18) }} هویت و مسیر رله</h2>
+    </div>
+
+    <div class="ar-grid ar-grid--2">
+      <div class="ar-field">
+        <label class="ar-label" for="auth_key">{{ icon('key', 15) }} کلید احراز هویت (auth_key)</label>
+        <div class="ar-input-group">
+          <input class="ar-input ar-mono" type="text" id="auth_key" name="auth_key" dir="ltr"
+                 value="{{ cfg.get('auth_key', '') }}" autocomplete="off" spellcheck="false">
+          <button class="ar-btn ar-btn--sm" id="gen-key" type="button" title="تولید کلید تصادفی">
+            {{ icon('refresh', 14) }}
+          </button>
+          <button class="ar-btn ar-btn--sm" data-copy="#auth_key" data-copy-label="کلید"
+                  type="button">{{ icon('copy', 14) }}</button>
+        </div>
+        <span class="ar-hint">
+          این مقدار باید <b>دقیقاً</b> با ثابت <span class="ar-mono ar-ltr">AUTH_KEY</span>
+          داخل Code.gs یکی باشد. حداقل ۱۶ کاراکتر.
+        </span>
+      </div>
+
+      <div class="ar-field">
+        <label class="ar-label" for="script_ids">{{ icon('link', 15) }} شناسه‌های استقرار Apps Script</label>
+        <textarea class="ar-textarea ar-ltr" id="script_ids" name="script_ids" rows="3"
+                  spellcheck="false" placeholder="هر شناسه در یک خط">{{ script_ids }}</textarea>
+        <span class="ar-hint">
+          چند شناسه = پهنای باند بیشتر و چرخش خودکار. با
+          <span class="ar-mono ar-ltr">parallel_relay</span> هماهنگ باشد.
+        </span>
+      </div>
+
+      <div class="ar-field">
+        <label class="ar-label" for="front_domain">{{ icon('globe', 15) }} دامنه‌ی فرانت</label>
+        <input class="ar-input ar-mono" type="text" id="front_domain" name="front_domain"
+               dir="ltr" value="{{ cfg.get('front_domain', 'www.google.com') }}">
+        <span class="ar-hint">دامنه‌ای که در SNI دیده می‌شود (نه مقصد واقعی).</span>
+      </div>
+
+      <div class="ar-field">
+        <label class="ar-label" for="google_ip">{{ icon('server', 15) }} IP گوگل</label>
+        <input class="ar-input ar-mono" type="text" id="google_ip" name="google_ip"
+               dir="ltr" value="{{ cfg.get('google_ip', '') }}">
+        <span class="ar-hint">
+          برای یافتن سریع‌ترین IP: <span class="ar-mono ar-ltr">python main.py --scan</span>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── شنود محلی ── -->
+  <section class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('wifi', 18) }} شنود محلی</h2>
+    </div>
+
+    <div class="ar-grid ar-grid--3">
+      <div class="ar-field">
+        <label class="ar-label" for="listen_host">آدرس شنود</label>
+        <input class="ar-input ar-mono" type="text" id="listen_host" name="listen_host"
+               dir="ltr" value="{{ cfg.get('listen_host', '127.0.0.1') }}">
+        <span class="ar-hint">۱۲۷.۰.۰.۱ = فقط همین دستگاه.</span>
+      </div>
+      {{ num_field('listen_port', 'پورت HTTP', 'پیش‌فرض ۸۰۸۵', 1, 1) }}
+      {{ num_field('socks5_port', 'پورت SOCKS5', 'باید با پورت HTTP فرق کند', 1, 1) }}
+    </div>
+
+    <div class="ar-grid ar-grid--3" style="margin-top:var(--ar-s5)">
+      {{ toggle_field('socks5_enabled', 'فعال‌سازی SOCKS5', 'شنونده‌ی SOCKS5 در کنار HTTP') }}
+      {{ toggle_field('lan_sharing', 'اشتراک‌گذاری در LAN', 'شنود روی ۰.۰.۰.۰ برای سایر دستگاه‌ها') }}
+      {{ toggle_field('verify_ssl', 'بررسی گواهی TLS', 'خاموش‌کردن فقط برای عیب‌یابی') }}
+    </div>
+
+    <div class="ar-note ar-note--warn" style="margin-top:var(--ar-s5)">
+      {{ icon('alert', 16) }}
+      <div>
+        اگر <b>اشتراک‌گذاری LAN</b> را روشن می‌کنید، حتماً در بخش
+        <a href="{{ url_for('users_page') }}">کاربران</a> احراز هویت را هم فعال کنید؛
+        وگرنه هر دستگاهی در شبکه بدون رمز از پروکسی شما استفاده خواهد کرد.
+      </div>
+    </div>
+  </section>
+
+  <!-- ── کارایی ── -->
+  <section class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('zap', 18) }} کارایی و تایم‌اوت</h2>
+    </div>
+
+    <div class="ar-grid ar-grid--4">
+      {{ num_field('relay_timeout', 'تایم‌اوت رله (ثانیه)', '', 1, 5) }}
+      {{ num_field('tls_connect_timeout', 'تایم‌اوت TLS (ثانیه)', '', 1, 3) }}
+      {{ num_field('tcp_connect_timeout', 'تایم‌اوت TCP (ثانیه)', '', 1, 1) }}
+      {{ num_field('parallel_relay', 'رله موازی', 'تعداد اسکریپت هم‌زمان', 1, 1) }}
+      {{ num_field('max_response_body_bytes', 'حداکثر حجم پاسخ (بایت)', '', 1048576, 1048576) }}
+      <div class="ar-field">
+        <label class="ar-label" for="log_level">سطح لاگ</label>
+        <select class="ar-select" id="log_level" name="log_level" dir="ltr">
+          {% for level in log_levels %}
+            <option value="{{ level }}" {% if cfg.get('log_level') == level %}selected{% endif %}>{{ level }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <h3 class="ar-section-title">دانلود تکه‌ای</h3>
+    <div class="ar-grid ar-grid--4">
+      {{ num_field('chunked_download_min_size', 'حداقل حجم (بایت)', '', 1024, 0) }}
+      {{ num_field('chunked_download_chunk_size', 'اندازه‌ی هر تکه (بایت)', '', 65536, 65536) }}
+      {{ num_field('chunked_download_max_parallel', 'تکه‌های هم‌زمان', '', 1, 1) }}
+      {{ num_field('chunked_download_max_chunks', 'حداکثر تعداد تکه', '', 1, 1) }}
+    </div>
+
+    <div style="margin-top:var(--ar-s5)">
+      {{ list_field('chunked_download_extensions', 'پسوندهای مشمول دانلود تکه‌ای',
+                    'هر پسوند در یک خط، با نقطه‌ی ابتدایی.', 5) }}
+    </div>
+  </section>
+
+  <!-- ── سیاست میزبان‌ها ── -->
+  <section class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('sliders', 18) }} سیاست میزبان‌ها</h2>
+    </div>
+    <p class="ar-card__sub">
+      هر سطر یک نام میزبان است. الگوی با نقطه‌ی ابتدایی (مثل
+      <span class="ar-mono ar-ltr">.local</span>) همه‌ی زیردامنه‌ها را می‌گیرد.
+    </p>
+
+    <div class="ar-grid ar-grid--2">
+      {{ list_field('block_hosts', 'میزبان‌های مسدود', 'ترافیک این میزبان‌ها با ۴۰۳ رد می‌شود.') }}
+      {{ list_field('bypass_hosts', 'میزبان‌های مستقیم', 'بدون MITM و بدون رله، مستقیم وصل می‌شوند.') }}
+      {{ list_field('forwarder_hosts', 'میزبان‌های فورواردر', 'از مسیر Upstream Forwarder عبور می‌کنند.') }}
+      {{ list_field('direct_google_exclude', 'سرویس‌های گوگل — همیشه از رله', 'مثل gemini.google.com') }}
+      {{ list_field('direct_google_allow', 'سرویس‌های گوگل — همیشه مستقیم', 'مثل www.google.com') }}
+
+      <div class="ar-field">
+        <label class="ar-label" for="hosts">نگاشت DNS دستی (hosts)</label>
+        <textarea class="ar-textarea ar-ltr" id="hosts" name="hosts" rows="4"
+                  spellcheck="false" placeholder="example.com = 1.2.3.4">{{ hosts_text }}</textarea>
+        <span class="ar-hint">هر سطر: <span class="ar-mono ar-ltr">دامنه = آی‌پی</span></span>
+      </div>
+    </div>
+
+    <div style="margin-top:var(--ar-s5)">
+      {{ toggle_field('youtube_via_relay', 'یوتیوب از مسیر رله',
+                      'روشن‌کردن، SafeSearch اجباری IP فرانت را دور می‌زند.') }}
+    </div>
+  </section>
+
+  <!-- ── ذخیره ── -->
+  <div class="ar-card ar-reveal ar-row ar-row--between" style="position:sticky;bottom:var(--ar-s4);z-index:20">
+    <label class="ar-switch">
+      <input type="checkbox" name="restart_after_save" {% if relay_running %}checked{% endif %}>
+      <span class="ar-switch__track"></span>
+      <span class="ar-switch__text">
+        <b>راه‌اندازی مجدد پس از ذخیره</b>
+        <span>بدون این کار، تغییرات تا ری‌استارت بعدی اعمال نمی‌شود.</span>
+      </span>
+    </label>
+    <button class="ar-btn ar-btn--primary" type="submit">
+      {{ icon('save', 16) }}<span>ذخیره‌ی config.json</span>
+    </button>
+  </div>
+</form>
+
+<!-- ── مودال پروفایل‌ها ── -->
+<div class="ar-modal" id="modal-profiles" hidden>
+  <div class="ar-card ar-modal__box">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('file', 18) }} پروفایل‌های کانفیگ</h2>
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-modal-close="modal-profiles"
+              type="button">{{ icon('x', 16) }}</button>
+    </div>
+    <p class="ar-card__sub">
+      یک نسخه از <span class="ar-mono ar-ltr">config.json</span> فعلی را با نام دلخواه
+      نگه دارید — مثلاً یک پروفایل برای خانه و یکی برای موبایل.
+    </p>
+
+    <div class="ar-input-group" style="margin-bottom:var(--ar-s4)">
+      <input class="ar-input" type="text" id="profile-name" placeholder="نام پروفایل">
+      <button class="ar-btn ar-btn--primary ar-btn--sm" id="profile-save" type="button">
+        {{ icon('plus', 14) }}<span>ذخیره</span>
+      </button>
+    </div>
+
+    <div id="profile-list" class="ar-stack" style="gap:var(--ar-s2)">
+      {% for profile in profiles %}
+      <div class="ar-row ar-row--between" style="padding:var(--ar-s2) var(--ar-s3);
+           border:1px solid var(--ar-hairline);border-radius:var(--ar-r-sm)">
+        <b>{{ profile.name }}</b>
+        <span class="ar-row" style="gap:var(--ar-s2)">
+          <button class="ar-btn ar-btn--sm" data-profile-load="{{ profile.name }}"
+                  type="button">بارگذاری</button>
+          <button class="ar-btn ar-btn--sm ar-btn--danger" data-profile-delete="{{ profile.name }}"
+                  type="button">{{ icon('trash', 13) }}</button>
+        </span>
+      </div>
+      {% else %}
+      <div class="ar-empty">{{ icon('file', 26) }}<b>پروفایلی ذخیره نشده</b></div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  Aras.action(document.getElementById("gen-key"), function () {
+    return Aras.post("/api/config/auth-key").then(function (data) {
+      if (!data.ok) { Aras.toast(data.error, "error"); return; }
+      document.getElementById("auth_key").value = data.auth_key;
+      Aras.toast("کلید جدید ساخته شد — یادتان باشد Code.gs را دوباره تولید کنید.",
+                 "warn", 7000);
+    });
+  });
+
+  Aras.action(document.getElementById("profile-save"), function () {
+    var name = document.getElementById("profile-name").value.trim();
+    if (!name) { Aras.toast("نام پروفایل را وارد کنید.", "error"); return; }
+    return Aras.post("/api/profiles/save", { name: name }).then(function (data) {
+      if (Aras.report(data, "پروفایل ذخیره شد.")) {
+        setTimeout(function () { location.reload(); }, 700);
+      }
+    });
+  });
+
+  document.addEventListener("click", function (event) {
+    var load = event.target.closest("[data-profile-load]");
+    if (load) {
+      Aras.post("/api/profiles/load", { name: load.dataset.profileLoad }).then(function (data) {
+        if (Aras.report(data)) setTimeout(function () { location.reload(); }, 700);
+      });
+      return;
+    }
+    var del = event.target.closest("[data-profile-delete]");
+    if (del) {
+      Aras.post("/api/profiles/delete", { name: del.dataset.profileDelete }).then(function (data) {
+        if (Aras.report(data, "پروفایل حذف شد.")) setTimeout(function () { location.reload(); }, 700);
+      });
+    }
+  });
+
+  /* Warn before leaving with unsaved edits — this form is long. */
+  var form = document.getElementById("config-form");
+  var dirty = false;
+  form.addEventListener("input", function () { dirty = true; });
+  form.addEventListener("submit", function () { dirty = false; });
+  window.addEventListener("beforeunload", function (event) {
+    if (!dirty) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+})();
+</script>
+{% endblock %}
