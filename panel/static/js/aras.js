@@ -459,6 +459,48 @@
     return self;
   };
 
+  /* ── polling ───────────────────────────────────────────────────── */
+
+  /**
+   * Repeatedly call `fn`, but only while the tab is actually being looked at.
+   *
+   * A background tab polling every 5 s burns CPU on both ends and, for a
+   * censorship tool, adds a steady request pattern for no benefit. Hidden tabs
+   * are paused entirely and resume with an immediate refresh, so the operator
+   * never sees stale numbers when they switch back.
+   *
+   * `options.idle` slows the loop down when `options.isIdle()` says nothing is
+   * moving — a stopped relay does not need five-second updates.
+   */
+  Aras.poll = function (fn, interval, options) {
+    options = options || {};
+    var idle = options.idle || interval * 3;
+    var timer = null;
+
+    function delay() {
+      return (options.isIdle && options.isIdle()) ? idle : interval;
+    }
+
+    function stop() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    }
+
+    function loop() {
+      stop();
+      if (document.hidden) return;
+      Promise.resolve(fn()).finally(function () {
+        if (!document.hidden) timer = setTimeout(loop, delay());
+      });
+    }
+
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) stop(); else loop();
+    });
+
+    loop();
+    return { stop: stop, refresh: loop };
+  };
+
   /* ── flash messages rendered server-side ───────────────────────── */
 
   document.addEventListener("DOMContentLoaded", function () {

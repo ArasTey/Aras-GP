@@ -162,6 +162,7 @@
 {% block scripts %}
 <script nonce="{{ csp_nonce() }}">
 (function () {
+  var relayRunning = {{ 'true' if status.running else 'false' }};
   // Window length comes from Settings; each sample is 5 s.
   var CHART_POINTS = {{ chart_window }};
 
@@ -227,6 +228,7 @@
         '<span class="ar-stat__unit">میلی‌ثانیه</span>';
       els.errors.textContent = s.errors ? Aras.number(s.errors) + " خطا" : "بدون خطا";
 
+      relayRunning = s.running;
       els.state.textContent = s.running ? "روشن" : "خاموش";
       els.uptime.textContent = s.running ? Aras.duration(s.uptime) : "متوقف";
 
@@ -259,8 +261,8 @@
     });
   }
 
-  tick();
-  setInterval(tick, 5000);
+  // Stopped relay: nothing changes, so poll a third as often.
+  Aras.poll(tick, 5000, { isIdle: function () { return !relayRunning; } });
 
   Aras.action(document.getElementById("btn-test"), function () {
     return Aras.post("/api/relay/test").then(function (result) {

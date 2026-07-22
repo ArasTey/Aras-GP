@@ -370,9 +370,10 @@ def create_app() -> Flask:
     def api_stats():
         stats = manager.stats()
         points = store.load()["settings"].get("chart_window", 120)
+        status = manager.status(stats if manager.running else None)
         return jsonify({
             "ok": True,
-            "status": manager.status(),
+            "status": status,
             "per_site": stats["per_site"][:40],
             "blacklisted_scripts": stats["blacklisted_scripts"],
             "sni_rotation": stats["sni_rotation"],
