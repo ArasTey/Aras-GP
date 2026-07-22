@@ -53,12 +53,26 @@
 git clone https://github.com/ArasTey/Aras-GP.git
 cd Aras-GP
 
-python -m venv .venv
-source .venv/bin/activate          # ویندوز: .venv\Scripts\activate
+# لینوکس / مک
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt -r panel/requirements.txt
-
 python -m panel
 ```
+
+<details>
+<summary>ویندوز</summary>
+
+```powershell
+py -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt -r panel/requirements.txt
+python -m panel
+```
+</details>
+
+> **نکته برای مک:** روی macOS دستور `python` وجود ندارد و باید `python3` بزنید.
+> بعد از فعال‌شدن venv (`source .venv/bin/activate`)، داخل آن `python` کار می‌کند.
 
 سپس <http://127.0.0.1:8600> را باز کنید. بار اول یک رمز عبور برای پنل تعیین
 می‌کنید (با PBKDF2 هش می‌شود).
@@ -151,6 +165,7 @@ deploy. A censorship-circumvention tool must not become the surveillance
 chokepoint it exists to avoid.
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r panel/requirements.txt
 python -m panel          # → http://127.0.0.1:8600
 ```

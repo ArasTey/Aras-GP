@@ -11,12 +11,15 @@ Domain Fronting از طریق Google Apps Script + Cloudflare Workers).
 ## اجرا
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv                # ویندوز: py -m venv .venv
 source .venv/bin/activate            # ویندوز: .venv\Scripts\activate
 pip install -r requirements.txt -r panel/requirements.txt
 
 python -m panel
 ```
+
+روی macOS دستور `python` وجود ندارد؛ برای ساخت venv حتماً `python3` بزنید.
+پس از فعال‌شدن venv، `python` داخل آن در دسترس است.
 
 سپس <http://127.0.0.1:8600> را باز کنید. در اولین اجرا یک رمز عبور برای پنل
 تعیین می‌کنید (با PBKDF2 هش می‌شود).
