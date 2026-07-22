@@ -166,7 +166,8 @@ def validate_script_name(name: str) -> str:
 
 
 def upload_script(token: str, account_id: str, script_name: str, source: str,
-                  upstream_forwarder_url: str = "") -> dict:
+                  upstream_forwarder_url: str = "",
+                  upstream_auth_key: str = "") -> dict:
     """``PUT /accounts/{id}/workers/scripts/{name}`` with an ES-module payload."""
     bindings = []
     if upstream_forwarder_url:
@@ -175,6 +176,14 @@ def upload_script(token: str, account_id: str, script_name: str, source: str,
             "name": "UPSTREAM_FORWARDER_URL",
             "text": upstream_forwarder_url,
         })
+        # The Worker refuses to forward without this, so the two always travel
+        # together — binding the URL alone produces a silent no-op.
+        if upstream_auth_key:
+            bindings.append({
+                "type": "secret_text",
+                "name": "UPSTREAM_AUTH_KEY",
+                "text": upstream_auth_key,
+            })
 
     metadata = {
         "main_module": "worker.js",
@@ -206,7 +215,8 @@ def enable_workers_dev(token: str, account_id: str, script_name: str) -> bool:
 
 
 def deploy(token: str, account_id: str, script_name: str,
-           upstream_forwarder_url: str = "") -> dict:
+           upstream_forwarder_url: str = "",
+           upstream_auth_key: str = "") -> dict:
     """Full deploy. Returns the public worker URL and the steps that ran."""
     account_id = (account_id or "").strip()
     if not re.fullmatch(r"[0-9a-fA-F]{32}", account_id):
@@ -230,7 +240,8 @@ def deploy(token: str, account_id: str, script_name: str,
     record("یافتن زیردامنه", True, f"{subdomain}.workers.dev")
 
     source = render_worker(script_name, subdomain)
-    upload_script(token, account_id, script_name, source, upstream_forwarder_url)
+    upload_script(token, account_id, script_name, source,
+                  upstream_forwarder_url, upstream_auth_key)
     record("آپلود اسکریپت", True, f"{len(source)} بایت")
 
     enable_workers_dev(token, account_id, script_name)
