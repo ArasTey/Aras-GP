@@ -471,8 +471,8 @@ def create_app() -> Flask:
             return _fail("کانفیگی برای ذخیره وجود ندارد.")
         try:
             store.save_profile(name, config)
-        except ValueError:
-            return _fail("نام پروفایل نامعتبر است.")
+        except (OSError, ValueError):
+            return _fail("نام پروفایل نامعتبر یا بیش از حد بلند است.")
         return _ok(profiles=store.list_profiles())
 
     @app.post("/api/profiles/load")

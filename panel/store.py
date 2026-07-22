@@ -169,10 +169,21 @@ def load_example_config() -> dict:
 # ── config profiles ───────────────────────────────────────────────────
 
 
+#: Filenames are bounded by the filesystem, not by characters: most cap a name
+#: at 255 *bytes*, and Persian letters cost two each. Truncating on characters
+#: alone still produced ENAMETOOLONG, so the cap is applied to the encoded form.
+_MAX_PROFILE_BYTES = 120
+
+
 def _profile_path(name: str) -> str:
-    safe = "".join(ch for ch in name if ch.isalnum() or ch in "-_ ").strip()
+    safe = "".join(ch for ch in str(name) if ch.isalnum() or ch in "-_ ").strip()
     if not safe:
         raise ValueError("empty profile name")
+    encoded = safe.encode("utf-8")
+    if len(encoded) > _MAX_PROFILE_BYTES:
+        safe = encoded[:_MAX_PROFILE_BYTES].decode("utf-8", "ignore").strip()
+        if not safe:
+            raise ValueError("profile name too long")
     return os.path.join(paths.PROFILES_DIR, f"{safe}.json")
 
 
@@ -202,7 +213,7 @@ def load_profile(name: str) -> dict | None:
     try:
         with open(_profile_path(name), encoding="utf-8") as handle:
             return json.load(handle)
-    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+    except (OSError, json.JSONDecodeError, ValueError, UnicodeDecodeError):
         return None
 
 
