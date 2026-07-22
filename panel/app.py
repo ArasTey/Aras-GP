@@ -33,6 +33,7 @@ from . import (
     security, store, users,
 )
 from .relay_manager import macos_trust_command, manager, refresh_ca_status
+from upstream_proxy import DEFAULT_AI_HOSTS, UpstreamError, UpstreamProxy  # engine/
 
 log = logging.getLogger("panel")
 
@@ -101,6 +102,41 @@ def _safe_next(target: str | None, fallback: str) -> str:
     if target.startswith("//") or target.startswith("/\\"):
         return fallback
     return target
+
+
+def _probe_upstream(proxy) -> dict:
+    """Ask api.ipify.org, through the exit, what IP the world sees.
+
+    Runs in a throwaway event loop so it never touches the relay's loop, and
+    is only ever called from the explicit "test" button.
+    """
+    import asyncio
+
+    async def run():
+        started = time.monotonic()
+        reader, writer = await proxy.connect("api.ipify.org", 80)
+        try:
+            writer.write(b"GET / HTTP/1.1\r\nHost: api.ipify.org\r\n"
+                         b"User-Agent: Aras-GP\r\nConnection: close\r\n\r\n")
+            await writer.drain()
+            raw = await asyncio.wait_for(reader.read(4096), timeout=15)
+        finally:
+            writer.close()
+        elapsed = (time.monotonic() - started) * 1000
+        body = raw.split(b"\r\n\r\n", 1)[-1].decode("utf-8", "replace").strip()
+        return {"ok": True, "ip": body[:64], "ms": round(elapsed, 1)}
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(asyncio.wait_for(run(), timeout=25))
+    except UpstreamError as exc:
+        return {"ok": False, "error": str(exc)}
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "خروجی در زمان مقرر پاسخ نداد."}
+    except Exception as exc:
+        return {"ok": False, "error": f"اتصال ناموفق بود: {exc}"}
+    finally:
+        loop.close()
 
 
 def _ok(**payload):
@@ -273,6 +309,8 @@ def create_app() -> Flask:
             settings=state["settings"],
             cf=state["cloudflare"],
             forwarder_env=forwarder_env,
+            upstream=(config.get("upstream_proxy") or {}),
+            default_ai_hosts=list(DEFAULT_AI_HOSTS),
             license=licensing.check(),
         )
 
@@ -500,6 +538,68 @@ def create_app() -> Flask:
         if not store.delete_relay((_json_body().get("id") or "").strip()):
             return _fail("رله پیدا نشد.", 404)
         return _ok(relays=store.list_relays(), message="رله حذف شد.")
+
+    # ── upstream exit (AI hosts / static IP) ──────────────────────────
+
+    @app.post("/api/upstream/save")
+    @security.login_required
+    def api_upstream_save():
+        body = _json_body()
+        config = store.load_config()
+        if config is None:
+            return _fail("ابتدا کانفیگ رله را بسازید.")
+
+        url = (body.get("url") or "").strip()
+        enabled = str(body.get("enabled", "")).lower() in ("1", "true", "on")
+        route_all = str(body.get("route_all", "")).lower() in ("1", "true", "on")
+        hosts = configgen.as_list(body.get("hosts"))
+
+        if enabled:
+            if not url:
+                return _fail("آدرس خروجی را وارد کنید.")
+            try:
+                UpstreamProxy(url)
+            except ValueError as exc:
+                return _fail(str(exc))
+
+        config["upstream_proxy"] = {
+            "enabled": enabled,
+            "url": url,
+            "route_all": route_all,
+            "hosts": hosts or list(DEFAULT_AI_HOSTS),
+        }
+        store.save_config(config)
+        message = "ذخیره شد."
+        if manager.running:
+            ok, detail = manager.restart(store.load_config())
+            message += f" رله بازراه‌اندازی {'شد' if ok else 'نشد'} — {detail}"
+        return _ok(message=message,
+                   hosts=config["upstream_proxy"]["hosts"])
+
+    @app.post("/api/upstream/test")
+    @security.login_required
+    @security.rate_limit("upstream_test", limit=10, window=60)
+    def api_upstream_test():
+        """Open one real connection through the exit and report the IP it has.
+
+        A single request, only when the operator presses the button — the
+        panel never probes this endpoint on a timer.
+        """
+        url = (_json_body().get("url") or "").strip()
+        if not url:
+            config = store.load_config() or {}
+            url = (config.get("upstream_proxy") or {}).get("url", "")
+        if not url:
+            return _fail("آدرس خروجی وارد نشده است.")
+        try:
+            proxy = UpstreamProxy(url)
+        except ValueError as exc:
+            return _fail(str(exc))
+
+        result = _probe_upstream(proxy)
+        if result.get("ok"):
+            return _ok(**result)
+        return _fail(result.get("error", "اتصال ناموفق بود."), 502)
 
     # ── backup / restore / reset ──────────────────────────────────────
 
