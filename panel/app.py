@@ -29,8 +29,8 @@ from flask import (
 )
 
 from . import (
-    __version__, cloudflare, configgen, gasgen, licensing, paths, security,
-    store, users,
+    __version__, cloudflare, configgen, failover, gasgen, licensing, paths,
+    security, store, users,
 )
 from .relay_manager import macos_trust_command, manager, refresh_ca_status
 
@@ -119,6 +119,34 @@ def create_app() -> Flask:
     # Flush per-user byte counters to config.json once a minute while the
     # relay runs, so quotas survive a kill -9 as well as a clean shutdown.
     manager.sample_hook = users.persist_live_usage
+
+    def _switch_to_next_relay(reason: str) -> bool:
+        """Move to the next saved relay. Called by the failover monitor.
+
+        Returns True when a switch actually happened, so the monitor knows
+        whether to keep watching or give up until traffic changes.
+        """
+        state = store.load()
+        target = failover.pick_next(store.list_relays(), state.get("active_relay"))
+        if target is None:
+            log.info("Failover wanted (%s) but no alternative relay is saved.", reason)
+            return False
+
+        if store.apply_relay(target["id"]) is None:
+            return False
+        log.warning("Failover: switching to relay %r — %s", target["name"], reason)
+        store.add_history({"kind": "failover", "ok": True,
+                           "script_name": target["name"], "error": reason})
+        config = store.load_config()
+        if config is not None and manager.running:
+            manager.restart(config)
+        return True
+
+    manager.switch_hook = _switch_to_next_relay
+
+    _settings = store.load()["settings"]
+    manager.failover.enabled = bool(_settings.get("auto_failover", False))
+    manager.failover.grace = float(_settings.get("failover_seconds", 60))
 
     @app.context_processor
     def _globals():
@@ -739,7 +767,12 @@ def create_app() -> Flask:
             "auto_start_relay": form.get("auto_start_relay") == "on",
             "remember_cloudflare_token": form.get("remember_cloudflare_token") == "on",
             "chart_window": _int_arg(form.get("chart_window"), 120, 30, 720),
+            "auto_failover": form.get("auto_failover") == "on",
+            "failover_seconds": _int_arg(form.get("failover_seconds"), 60, 20, 600),
         })
+        manager.failover.enabled = form.get("auto_failover") == "on"
+        manager.failover.grace = float(_int_arg(form.get("failover_seconds"), 60, 20, 600))
+
         if form.get("panel_password"):
             if len(form["panel_password"]) < 10:
                 flash("رمز جدید پنل باید حداقل ۱۰ کاراکتر باشد.", "error")

@@ -37,6 +37,8 @@ from cert_installer import is_ca_trusted          # from engine/
 from mitm import CA_CERT_FILE                     # from engine/
 from proxy_server import ProxyServer              # from engine/
 
+from .failover import FailoverMonitor
+
 log = logging.getLogger("panel.relay")
 
 SAMPLE_INTERVAL = 5.0     # seconds between dashboard samples
@@ -117,6 +119,12 @@ class RelayManager:
         #: set here rather than imported, because users.py imports this module.
         self.sample_hook = None
         self._last_hook = 0.0
+
+        #: Passive health watcher. Evaluated on the sampler tick that already
+        #: runs, so enabling failover costs no extra thread and no extra
+        #: request. ``switch_hook`` is set by the app layer.
+        self.failover = FailoverMonitor()
+        self.switch_hook = None
 
     # ── lifecycle ─────────────────────────────────────────────────────
 
@@ -400,6 +408,10 @@ class RelayManager:
                     "connections": snapshot["account_totals"]["connections"],
                 })
 
+                errors = sum(row["errors"] for row in snapshot["per_site"])
+                if self.failover.evaluate(requests, errors, self.last_success_at):
+                    self._attempt_failover()
+
                 # Flush per-user usage so a crash costs at most one interval
                 # of accounting rather than the whole billing period.
                 now = time.time()
@@ -411,6 +423,23 @@ class RelayManager:
                         log.debug("Sample hook error: %s", exc)
             except Exception as exc:
                 log.debug("Sampler error: %s", exc)
+
+    def _attempt_failover(self) -> None:
+        """Hand off to the app layer, which owns the saved-relay store."""
+        if not self.switch_hook:
+            return
+        try:
+            moved = self.switch_hook(self.failover.last_reason)
+        except Exception as exc:
+            log.error("Failover attempt failed: %s", exc)
+            return
+        if moved:
+            self.failover.note_switch()
+            log.warning("Switched relay automatically — %s",
+                        self.failover.last_reason)
+        else:
+            # Nowhere to go; stop re-deciding every 5 s.
+            self.failover.reset()
 
     def series(self, limit: int = 120) -> list[dict]:
         return list(self._samples)[-limit:]
@@ -456,6 +485,7 @@ class RelayManager:
             "ca_present": os.path.exists(CA_CERT_FILE),
             "ca_trusted": _ca_trusted_cached(),
             "ca_path": CA_CERT_FILE,
+            "failover": self.failover.snapshot(),
         }
 
 
