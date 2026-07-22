@@ -100,6 +100,15 @@ class MITMCertManager:
                 ),
                 critical=True,
             )
+            # A Subject Key Identifier on the CA lets each leaf carry a matching
+            # Authority Key Identifier. macOS/Safari builds the trust chain by
+            # that link, and rejects leaves whose issuer it cannot resolve.
+            .add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(
+                    self._ca_key.public_key()
+                ),
+                critical=False,
+            )
             .sign(self._ca_key, hashes.SHA256())
         )
 
@@ -160,6 +169,9 @@ class MITMCertManager:
         except ValueError:
             san_entry = x509.DNSName(domain)
 
+        # Apple caps TLS-server leaf validity at 398 days (certs issued after
+        # 2020-09-01); a longer one is rejected outright by Safari and the
+        # macOS trust engine. Stay comfortably under it.
         now = datetime.datetime.now(datetime.timezone.utc)
         cert = (
             x509.CertificateBuilder()
@@ -167,10 +179,49 @@ class MITMCertManager:
             .issuer_name(self._ca_cert.subject)
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(now)
-            .not_valid_after(now + datetime.timedelta(days=365))
+            .not_valid_before(now - datetime.timedelta(minutes=5))
+            .not_valid_after(now + datetime.timedelta(days=397))
             .add_extension(
                 x509.SubjectAlternativeName([san_entry]),
+                critical=False,
+            )
+            # Everything below is what modern browsers require of a TLS server
+            # cert and the previous version omitted — which is why Chrome and
+            # Safari refused every intercepted site even with the CA trusted:
+            #   • not a CA
+            .add_extension(
+                x509.BasicConstraints(ca=False, path_length=None),
+                critical=True,
+            )
+            #   • usable for a TLS handshake
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    key_encipherment=True,
+                    content_commitment=False,
+                    data_encipherment=False,
+                    key_agreement=False,
+                    key_cert_sign=False,
+                    crl_sign=False,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+            #   • serverAuth — Chrome and Safari reject a leaf without it
+            .add_extension(
+                x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
+                critical=False,
+            )
+            #   • chain link back to the CA's Subject Key Identifier
+            .add_extension(
+                x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                    self._ca_key.public_key()
+                ),
+                critical=False,
+            )
+            .add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(key.public_key()),
                 critical=False,
             )
             .sign(self._ca_key, hashes.SHA256())
