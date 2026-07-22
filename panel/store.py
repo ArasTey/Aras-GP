@@ -30,6 +30,8 @@ DEFAULT_STATE: dict = {
         "auto_start_relay": False,
         "remember_cloudflare_token": False,
         "chart_window": 120,
+        "auto_failover": False,
+        "failover_seconds": 60,
     },
     "cloudflare": {            # only populated when the operator opts in
         "account_id": "",

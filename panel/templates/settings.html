@@ -39,6 +39,29 @@
         </span>
       </label>
 
+      <label class="ar-switch">
+        <input type="checkbox" name="auto_failover" {% if settings.auto_failover %}checked{% endif %}>
+        <span class="ar-switch__track"></span>
+        <span class="ar-switch__text">
+          <b>سوییچ خودکار به رله‌ی بعدی</b>
+          <span>
+            اگر رله‌ی فعال بیش از مدت زیر پیوسته خطا بدهد، خودکار به رله‌ی
+            ذخیره‌شده‌ی بعدی سوییچ می‌شود. تشخیص از روی ترافیک واقعی انجام
+            می‌شود — هیچ درخواست اضافه‌ای برای پینگ فرستاده نمی‌شود.
+          </span>
+        </span>
+      </label>
+
+      <div class="ar-field" style="max-width:280px">
+        <label class="ar-label" for="failover_seconds">آستانه‌ی سوییچ (ثانیه)</label>
+        <input class="ar-input ar-num" type="number" id="failover_seconds"
+               name="failover_seconds" value="{{ settings.failover_seconds }}"
+               min="20" max="600" step="10" dir="ltr">
+        <span class="ar-hint">
+          پیش‌فرض ۶۰ ثانیه. برای سوییچ، حداقل دو رله باید ذخیره شده باشد.
+        </span>
+      </div>
+
       <div class="ar-field" style="max-width:280px">
         <label class="ar-label" for="chart_window">تعداد نمونه‌های نمودار</label>
         <input class="ar-input ar-num" type="number" id="chart_window" name="chart_window"

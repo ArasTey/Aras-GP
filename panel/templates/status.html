@@ -98,6 +98,20 @@
         <span class="ar-hint">دامنه‌ی فرانت</span>
         <b class="ar-mono ar-ltr">{{ status.front_domain }}</b>
       </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">سوییچ خودکار</span>
+        {% if status.failover.enabled %}
+          <span class="ar-pill ar-pill--on">فعال — {{ status.failover.grace|int }}s</span>
+        {% else %}
+          <span class="ar-pill ar-pill--off">غیرفعال</span>
+        {% endif %}
+      </div>
+      {% if status.failover.switches %}
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">تعداد سوییچ خودکار</span>
+        <b class="ar-num">{{ status.failover.switches }}</b>
+      </div>
+      {% endif %}
       <div id="s-probe" class="ar-hint">
         برای پاسخ قطعی، دکمه‌ی «تست اتصال» یک درخواست واقعی از همان مسیر ترافیک عادی می‌فرستد.
       </div>
