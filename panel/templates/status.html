@@ -137,10 +137,30 @@
           {{ icon('download', 14) }}<span>دانلود</span>
         </a>
       </div>
+      <div id="ca-help" {% if status.ca_trusted %}hidden{% endif %}>
+        <div class="ar-note ar-note--warn" style="margin-top:var(--ar-s2)">
+          {{ icon('alert', 15) }}
+          <div>
+            <b>مرورگر این گواهی را قبول نمی‌کند.</b>
+            روی macOS نصب خودکار در <span class="ar-mono ar-ltr">login keychain</span>
+            انجام می‌شود، ولی کروم و سافاری فقط
+            <span class="ar-mono ar-ltr">System keychain</span> را برای یک root CA
+            می‌پذیرند. این دستور را در ترمینال بزنید (رمز مک را می‌خواهد):
+            <div class="ar-code" style="margin-top:var(--ar-s3)">
+              <div class="ar-code__bar">
+                <span class="ar-mono">Terminal</span>
+                <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#ca-cmd"
+                        data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button>
+              </div>
+              <pre id="ca-cmd">{{ ca_command }}</pre>
+            </div>
+            بعد مرورگر را کامل ببندید (⌘Q) و دوباره باز کنید.
+          </div>
+        </div>
+      </div>
       <span class="ar-hint">
-        این گواهی فقط برای رمزگشایی ترافیک مرورگر <b>خودتان</b> روی همین دستگاه است.
-        اگر نصب خودکار نشد: <span class="ar-mono ar-ltr">python main.py --install-cert</span>
-        با دسترسی مدیر.
+        این گواهی فقط برای رمزگشایی ترافیک مرورگر <b>خودتان</b> روی همین دستگاه است
+        و هیچ ربطی به کاربران پروکسی ندارد — تعداد کاربران روی آن اثری نمی‌گذارد.
       </span>
     </div>
   </article>
@@ -250,6 +270,9 @@
         var badge = document.getElementById("s-ca");
         badge.textContent = data.trusted ? "بله" : "خیر";
         badge.className = "ar-pill " + (data.trusted ? "ar-pill--on" : "ar-pill--warn");
+        var help = document.getElementById("ca-help");
+        if (help) help.hidden = !!data.trusted;
+        if (data.command) document.getElementById("ca-cmd").textContent = data.command;
       });
     });
   });
