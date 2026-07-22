@@ -17,20 +17,22 @@ Nothing else. No telemetry, no analytics, no update check, no licence server.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import time
 
 from flask import (
-    Flask, flash, jsonify, redirect, render_template, request, send_file, url_for,
+    Flask, Response, flash, jsonify, redirect, render_template, request,
+    send_file, url_for,
 )
 
 from . import (
     __version__, cloudflare, configgen, gasgen, licensing, paths, security,
     store, users,
 )
-from .relay_manager import manager, refresh_ca_status
+from .relay_manager import macos_trust_command, manager, refresh_ca_status
 
 log = logging.getLogger("panel")
 
@@ -191,6 +193,8 @@ def create_app() -> Flask:
             gas=state["gas"],
             gas_steps=gasgen.STEPS,
             auth_key_set=bool(config.get("auth_key")),
+            auth_key=config.get("auth_key", ""),
+            cf_token_url=cloudflare.TOKEN_TEMPLATE_URL,
             history=state["deploy_history"][:12],
         )
 
@@ -247,7 +251,8 @@ def create_app() -> Flask:
     @app.route("/status")
     @security.login_required
     def status_page():
-        return render_template("status.html", status=manager.status())
+        return render_template("status.html", status=manager.status(),
+                               ca_command=macos_trust_command())
 
     # ── relay lifecycle ───────────────────────────────────────────────
 
@@ -330,7 +335,29 @@ def create_app() -> Flask:
     @app.post("/api/config/auth-key")
     @security.login_required
     def api_auth_key():
-        return _ok(auth_key=configgen.generate_auth_key())
+        """Generate a key and, if asked, persist it into config.json.
+
+        The deploy page needs a usable auth_key before Code.gs can be
+        rendered, so it can save one without a round trip to the config form.
+        """
+        body = _json_body()
+        key = (body.get("auth_key") or "").strip() or configgen.generate_auth_key()
+
+        if str(body.get("save", "")).lower() in ("1", "true", "on"):
+            if len(key) < configgen.MIN_AUTH_KEY_LENGTH:
+                return _fail(
+                    f"کلید باید حداقل {configgen.MIN_AUTH_KEY_LENGTH} کاراکتر باشد."
+                )
+            config = store.load_config() or configgen.defaults()
+            config["auth_key"] = key
+            store.save_config(configgen.strip_internal(config))
+            note = ("ذخیره شد. یادتان باشد Code.gs را دوباره تولید و در "
+                    "Apps Script جای‌گذاری کنید.")
+            if manager.running:
+                note += " برای اعمال، رله را ری‌استارت کنید."
+            return _ok(auth_key=key, saved=True, message=note)
+
+        return _ok(auth_key=key, saved=False)
 
     @app.post("/config")
     @security.login_required
@@ -394,6 +421,110 @@ def create_app() -> Flask:
         if not store.delete_profile(name):
             return _fail("حذف پروفایل ناموفق بود.")
         return _ok(profiles=store.list_profiles())
+
+    # ── saved relays ──────────────────────────────────────────────────
+
+    @app.get("/api/relays")
+    @security.login_required
+    def api_relays_list():
+        return _ok(relays=store.list_relays())
+
+    @app.post("/api/relays/save")
+    @security.login_required
+    def api_relays_save():
+        body = _json_body()
+        config = store.load_config()
+        if config is None:
+            return _fail("کانفیگی برای ذخیره وجود ندارد.")
+        try:
+            configgen.validate(config)
+        except configgen.ConfigError as exc:
+            return _fail(f"این رله هنوز کامل نیست: {exc}")
+
+        name = (body.get("name") or "").strip()
+        if not name:
+            return _fail("یک نام برای رله وارد کنید.")
+        if len(name) > 60:
+            return _fail("نام رله بیش از حد بلند است.")
+
+        record = store.relay_from_config(
+            config, name,
+            {**store.load()["cloudflare"], "note": (body.get("note") or "").strip()},
+        )
+        store.save_relay(record)
+        return _ok(relays=store.list_relays(), message="رله ذخیره شد.")
+
+    @app.post("/api/relays/apply")
+    @security.login_required
+    def api_relays_apply():
+        relay = store.apply_relay((_json_body().get("id") or "").strip())
+        if relay is None:
+            return _fail("رله پیدا نشد.", 404)
+        message = "رله فعال شد."
+        if manager.running:
+            ok, restart_message = manager.restart(store.load_config())
+            message = f"رله فعال شد و بازراه‌اندازی {'شد' if ok else 'نشد'}: {restart_message}"
+        return _ok(relays=store.list_relays(), message=message)
+
+    @app.post("/api/relays/delete")
+    @security.login_required
+    def api_relays_delete():
+        if not store.delete_relay((_json_body().get("id") or "").strip()):
+            return _fail("رله پیدا نشد.", 404)
+        return _ok(relays=store.list_relays(), message="رله حذف شد.")
+
+    # ── backup / restore / reset ──────────────────────────────────────
+
+    @app.get("/api/backup/export")
+    @security.login_required
+    def api_backup_export():
+        include = request.args.get("secrets", "1") != "0"
+        payload = store.export_backup(include_secrets=include)
+        payload["panel_version"] = __version__
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        suffix = "" if include else "-بدون-رمز"
+        body = json.dumps(payload, indent=2, ensure_ascii=False)
+        return Response(
+            body,
+            mimetype="application/json",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="aras-gp-backup-{stamp}{suffix}.json"',
+            },
+        )
+
+    @app.post("/api/backup/import")
+    @security.login_required
+    @security.rate_limit("backup_import", limit=5, window=300)
+    def api_backup_import():
+        upload = request.files.get("backup")
+        if upload is None:
+            return _fail("فایلی انتخاب نشده است.")
+        try:
+            payload = json.loads(upload.read().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return _fail("فایل پشتیبان قابل خواندن نیست.")
+        try:
+            restored = store.import_backup(payload)
+        except ValueError as exc:
+            return _fail(str(exc))
+        log.info("Backup restored: %s", ", ".join(restored))
+        return _ok(restored=restored,
+                   message="بازگردانی شد: " + "، ".join(restored))
+
+    @app.post("/api/reset")
+    @security.login_required
+    @security.rate_limit("reset", limit=3, window=600)
+    def api_reset():
+        # Destructive and irreversible, so it needs an explicit typed
+        # confirmation rather than a single click.
+        if (_json_body().get("confirm") or "").strip() != "DELETE":
+            return _fail("برای تأیید، عبارت DELETE را وارد کنید.")
+        if manager.running:
+            manager.stop()
+        store.factory_reset(keep_admin=True)
+        log.warning("Factory reset performed from %s", security.client_ip())
+        return _ok(message="همه‌ی داده‌ها پاک شد. رمز پنل دست‌نخورده ماند.")
 
     # ── Cloudflare deploy ─────────────────────────────────────────────
 
@@ -679,7 +810,7 @@ def create_app() -> Flask:
     @app.get("/api/ca/status")
     @security.login_required
     def api_ca_status():
-        return _ok(trusted=refresh_ca_status())
+        return _ok(trusted=refresh_ca_status(), command=macos_trust_command())
 
     # ── errors ────────────────────────────────────────────────────────
 

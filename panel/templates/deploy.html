@@ -28,6 +28,30 @@
   </p>
 
   <div class="ar-grid ar-grid--2">
+    <div class="ar-field" style="grid-column:1/-1">
+      <div class="ar-note ar-note--info">
+        {{ icon('key', 16) }}
+        <div>
+          <b>توکن ندارید؟</b> این لینک صفحه‌ی ساخت توکن کلودفلر را با دسترسی‌های
+          لازم <b>از قبل انتخاب‌شده</b> باز می‌کند — فقط
+          «Continue to summary» و بعد «Create Token» را بزنید.
+          <div class="ar-row" style="margin-top:var(--ar-s3)">
+            <a class="ar-btn ar-btn--accent ar-btn--sm" target="_blank" rel="noopener noreferrer"
+               href="{{ cf_token_url }}">
+              {{ icon('link', 14) }}<span>ساخت توکن با دسترسی آماده</span>
+            </a>
+            <span class="ar-hint">
+              دسترسی‌ها: <span class="ar-mono ar-ltr">Workers Scripts · Edit</span>
+              و <span class="ar-mono ar-ltr">Account Settings · Read</span>
+            </span>
+          </div>
+          <div class="ar-hint" style="margin-top:var(--ar-s2)">
+            توکن فقط یک بار نمایش داده می‌شود — همان لحظه کپی و اینجا وارد کنید.
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="ar-field">
       <label class="ar-label" for="cf-token">{{ icon('key', 15) }} API Token</label>
       <input class="ar-input ar-mono" type="password" id="cf-token" dir="ltr"
@@ -126,6 +150,25 @@
   <div class="ar-grid ar-grid--sidebar">
     <div>
       <div class="ar-field" style="margin-bottom:var(--ar-s4)">
+        <label class="ar-label" for="gas-auth-key">{{ icon('key', 15) }} کلید احراز هویت (auth_key)</label>
+        <div class="ar-input-group">
+          <input class="ar-input ar-mono" type="text" id="gas-auth-key" dir="ltr"
+                 value="{{ auth_key }}" autocomplete="off" spellcheck="false"
+                 placeholder="هنوز ساخته نشده">
+          <button class="ar-btn ar-btn--sm" id="gas-key-gen" type="button"
+                  title="ساخت کلید تصادفی">{{ icon('refresh', 14) }}</button>
+          <button class="ar-btn ar-btn--sm" data-copy="#gas-auth-key" data-copy-label="کلید"
+                  type="button">{{ icon('copy', 14) }}</button>
+        </div>
+        <span class="ar-hint">
+          همین‌جا می‌توانید بسازید و ذخیره کنید — لازم نیست اول به صفحه‌ی
+          «ساخت کانفیگ» بروید. این مقدار باید <b>دقیقاً</b> با
+          <span class="ar-mono ar-ltr">AUTH_KEY</span> داخل Code.gs یکی باشد،
+          و تولید کد پایین خودش از همین استفاده می‌کند.
+        </span>
+      </div>
+
+      <div class="ar-field" style="margin-bottom:var(--ar-s4)">
         <label class="ar-label" for="gas-worker-url">{{ icon('link', 15) }} آدرس Worker</label>
         <input class="ar-input ar-mono" type="text" id="gas-worker-url" dir="ltr"
                value="{{ cf.worker_url }}" placeholder="https://aras-relay.username.workers.dev">
@@ -194,6 +237,31 @@
         {% endfor %}
       </div>
     </div>
+  </div>
+</section>
+
+<!-- ── مرحله ۳: ذخیره‌ی رله ────────────────────────────────────── -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('save', 18) }} مرحله ۳ — ذخیره‌ی رله</h2>
+    <span class="ar-pill ar-pill--info">قابل استفاده‌ی مجدد</span>
+  </div>
+  <p class="ar-card__sub">
+    وقتی زنجیره‌ات کار کرد، همین‌جا با یک نام ذخیره‌اش کن. دفعه‌ی بعد به‌جای
+    دیپلوی دوباره، فقط رویش کلیک می‌کنی و کانفیگ با همان کلید و شناسه‌ها
+    برمی‌گردد. کلید احراز هویت هم داخل همان رکورد نگه داشته می‌شود.
+  </p>
+
+  <div class="ar-input-group" style="margin-bottom:var(--ar-s5)">
+    <input class="ar-input" type="text" id="relay-name" maxlength="60"
+           placeholder="نامی برای این رله — مثلاً «رله اصلی» یا «موبایل»">
+    <button class="ar-btn ar-btn--primary" id="relay-save" type="button">
+      {{ icon('plus', 15) }}<span>ذخیره‌ی رله فعلی</span>
+    </button>
+  </div>
+
+  <div id="relay-list" class="ar-stack" style="gap:var(--ar-s3)">
+    <div class="ar-empty">{{ icon('save', 26) }}<b>در حال بارگذاری…</b></div>
   </div>
 </section>
 
@@ -305,11 +373,98 @@
     });
   }
 
+  /* ── saved relays ── */
+  var relayList = document.getElementById("relay-list");
+
+  function renderRelays(list) {
+    if (!list.length) {
+      relayList.innerHTML = '<div class="ar-empty">' +
+        "<b>هنوز رله‌ای ذخیره نشده</b>" +
+        "<span>وقتی زنجیره‌ات کار کرد، بالا یک نام بده و ذخیره کن.</span></div>";
+      return;
+    }
+    relayList.innerHTML = list.map(function (r) {
+      var badge = r.active
+        ? '<span class="ar-pill ar-pill--on">فعال</span>'
+        : '<span class="ar-pill ar-pill--off">ذخیره‌شده</span>';
+      return '<div class="ar-row ar-row--between" style="padding:var(--ar-s3);' +
+        "border:1px solid var(--ar-hairline);border-radius:var(--ar-r-md);" +
+        (r.active ? "background:rgba(124,92,255,0.07)" : "") + '">' +
+        "<div style='min-width:0'>" +
+          "<b>" + Aras.escape(r.name) + "</b> " + badge +
+          "<div class='ar-hint ar-mono ar-ltr' style='font-size:11px'>" +
+            (r.script_ids || []).length + " script · " +
+            Aras.escape(r.front_domain || "") +
+            (r.worker_url ? " · " + Aras.escape(r.worker_url) : "") +
+          "</div>" +
+        "</div>" +
+        '<span class="ar-row" style="gap:var(--ar-s2);flex-wrap:nowrap">' +
+          (r.active ? "" :
+            '<button class="ar-btn ar-btn--sm ar-btn--primary" data-relay-apply="' +
+            Aras.escape(r.id) + '">فعال کن</button>') +
+          '<button class="ar-btn ar-btn--sm ar-btn--danger" data-relay-del="' +
+            Aras.escape(r.id) + '">' + "حذف" + "</button>" +
+        "</span></div>";
+    }).join("");
+  }
+
+  Aras.api("/api/relays").then(function (d) { if (d.ok) renderRelays(d.relays); });
+
+  Aras.action(document.getElementById("relay-save"), function () {
+    var name = document.getElementById("relay-name").value.trim();
+    return Aras.post("/api/relays/save", { name: name }).then(function (data) {
+      if (!Aras.report(data)) return;
+      document.getElementById("relay-name").value = "";
+      renderRelays(data.relays);
+    });
+  });
+
+  document.addEventListener("click", function (event) {
+    var apply = event.target.closest("[data-relay-apply]");
+    if (apply) {
+      Aras.post("/api/relays/apply", { id: apply.dataset.relayApply })
+        .then(function (data) {
+          if (Aras.report(data)) setTimeout(function () { location.reload(); }, 900);
+        });
+      return;
+    }
+    var del = event.target.closest("[data-relay-del]");
+    if (del) {
+      if (!confirm("این رله ذخیره‌شده حذف شود؟ کانفیگ فعلی دست نمی‌خورد.")) return;
+      Aras.post("/api/relays/delete", { id: del.dataset.relayDel })
+        .then(function (data) { if (Aras.report(data)) renderRelays(data.relays); });
+    }
+  });
+
   /* ── Apps Script ── */
   var codeBox = document.getElementById("gas-code");
   var copyBtn = document.getElementById("gas-copy");
 
   var gasWorkerUrl = document.getElementById("gas-worker-url");
+  var gasAuthKey = document.getElementById("gas-auth-key");
+
+  Aras.action(document.getElementById("gas-key-gen"), function () {
+    return Aras.post("/api/config/auth-key", { save: "1" }).then(function (data) {
+      if (!data.ok) { Aras.toast(data.error, "error", 7000); return; }
+      gasAuthKey.value = data.auth_key;
+      Aras.toast(data.message || "کلید ساخته و ذخیره شد.", "warn", 8000);
+    });
+  });
+
+  // Typing a key by hand should persist too, otherwise Code.gs would be
+  // generated from a value that never reached config.json.
+  var keyTimer = null;
+  gasAuthKey.addEventListener("input", function () {
+    clearTimeout(keyTimer);
+    keyTimer = setTimeout(function () {
+      var value = gasAuthKey.value.trim();
+      if (value.length < 16) return;
+      Aras.post("/api/config/auth-key", { auth_key: value, save: "1" })
+        .then(function (data) {
+          if (!data.ok) Aras.toast(data.error, "error", 6000);
+        });
+    }, 900);
+  });
 
   Aras.action(document.getElementById("gas-generate"), function () {
     // Prefer a URL just deployed in this session, then the saved one, then
@@ -317,7 +472,10 @@
     var deployed = (document.getElementById("cf-new-url") || {}).textContent || "";
     var workerUrl = (deployed || gasWorkerUrl.value || "").trim();
     gasWorkerUrl.value = workerUrl;
-    return Aras.post("/api/gas/code", { worker_url: workerUrl }).then(function (data) {
+    return Aras.post("/api/gas/code", {
+      worker_url: workerUrl,
+      auth_key: gasAuthKey.value.trim()
+    }).then(function (data) {
       if (!data.ok) { Aras.toast(data.error, "error", 8000); return; }
       codeBox.textContent = data.code;
       copyBtn.disabled = false;

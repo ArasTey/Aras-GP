@@ -34,6 +34,17 @@ COMPATIBILITY_DATE = "2024-11-01"
 
 SCRIPT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$")
 
+#: Deep link that opens Cloudflare's token screen with exactly the permissions
+#: this panel needs already ticked, so the operator only has to confirm.
+#:   workers_scripts:edit   → upload the script, enable workers.dev
+#:   account_settings:read  → list accounts so Account ID can be auto-filled
+TOKEN_TEMPLATE_URL = (
+    "https://dash.cloudflare.com/profile/api-tokens"
+    "?permissionGroupKeys=%5B%7B%22key%22%3A%22workers_scripts%22%2C%22type%22"
+    "%3A%22edit%22%7D%2C%7B%22key%22%3A%22account_settings%22%2C%22type%22%3A"
+    "%22read%22%7D%5D&name=Aras-GP+Panel&accountId=%2A&zoneId=all"
+)
+
 
 class CloudflareError(RuntimeError):
     """Carries a Persian message plus the raw API errors for the details pane."""

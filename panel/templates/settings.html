@@ -100,6 +100,72 @@
 
 <section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
   <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('save', 18) }} پشتیبان‌گیری و داده‌ها</h2>
+  </div>
+  <p class="ar-card__sub">
+    یک فایل پشتیبان شامل کانفیگ رله، کاربران پروکسی، رله‌های ذخیره‌شده،
+    پروفایل‌ها و تنظیمات پنل. توکن کلودفلر <b>هیچ‌وقت</b> داخل فایل پشتیبان
+    نوشته نمی‌شود.
+  </p>
+
+  <div class="ar-grid ar-grid--2">
+    <div>
+      <h3 class="ar-section-title" style="margin-top:0">دانلود</h3>
+      <div class="ar-row" style="gap:var(--ar-s2)">
+        <a class="ar-btn ar-btn--primary ar-btn--sm" href="{{ url_for('api_backup_export') }}">
+          {{ icon('download', 14) }}<span>پشتیبان کامل</span>
+        </a>
+        <a class="ar-btn ar-btn--sm" href="{{ url_for('api_backup_export') }}?secrets=0">
+          {{ icon('eye', 14) }}<span>بدون رمزها</span>
+        </a>
+      </div>
+      <span class="ar-hint" style="display:block;margin-top:var(--ar-s2)">
+        نسخه‌ی «بدون رمزها» کلید احراز هویت و هش رمز کاربران را حذف می‌کند —
+        برای وقتی که می‌خواهید فایل را برای پشتیبانی بفرستید.
+      </span>
+    </div>
+
+    <div>
+      <h3 class="ar-section-title" style="margin-top:0">بازگردانی</h3>
+      <form id="restore-form" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="ar-input-group">
+          <input class="ar-input" type="file" name="backup" id="restore-file" accept=".json">
+          <button class="ar-btn ar-btn--sm" id="restore-btn" type="submit">
+            {{ icon('refresh', 14) }}<span>بازگردانی</span>
+          </button>
+        </div>
+      </form>
+      <span class="ar-hint" style="display:block;margin-top:var(--ar-s2)">
+        داده‌های فعلی با محتوای فایل جایگزین می‌شوند. رمز پنل دست نمی‌خورد.
+      </span>
+    </div>
+  </div>
+
+  <hr class="ar-divider">
+
+  <h3 class="ar-section-title" style="margin-top:0;color:var(--ar-rose-400)">
+    پاک‌کردن همه‌ی داده‌ها
+  </h3>
+  <div class="ar-note ar-note--bad">
+    {{ icon('alert', 16) }}
+    <div>
+      <b>برگشت‌ناپذیر است.</b> کانفیگ رله، همه‌ی کاربران پروکسی، رله‌های
+      ذخیره‌شده و پروفایل‌ها پاک می‌شوند. رمز ورود پنل حفظ می‌شود تا از
+      پنل خودتان بیرون نمانید. اگر پشتیبان می‌خواهید، اول دانلودش کنید.
+      <div class="ar-input-group" style="margin-top:var(--ar-s4);max-width:420px">
+        <input class="ar-input ar-mono" type="text" id="reset-confirm" dir="ltr"
+               placeholder="برای تأیید بنویسید: DELETE" autocomplete="off">
+        <button class="ar-btn ar-btn--danger ar-btn--sm" id="reset-btn" type="button">
+          {{ icon('trash', 14) }}<span>پاک کن</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
     <h2 class="ar-card__title">{{ icon('shield', 18) }} لایسنس</h2>
     {% if license.required %}
       {% if license.valid %}<span class="ar-pill ar-pill--on">معتبر</span>
@@ -168,6 +234,43 @@
 (function () {
   document.querySelectorAll("[data-epoch]").forEach(function (node) {
     if (node.dataset.epoch) node.textContent = Aras.dateTime(node.dataset.epoch);
+  });
+
+  /* backup restore */
+  var restoreForm = document.getElementById("restore-form");
+  restoreForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var file = document.getElementById("restore-file").files[0];
+    if (!file) { Aras.toast("اول یک فایل پشتیبان انتخاب کنید.", "error"); return; }
+    var btn = document.getElementById("restore-btn");
+    Aras.busy(btn, true);
+    fetch("/api/backup/import", {
+      method: "POST",
+      headers: { "X-CSRF-Token": document.querySelector('meta[name=csrf-token]').content },
+      body: new FormData(restoreForm),
+      credentials: "same-origin"
+    }).then(function (r) { return r.json(); })
+      .then(function (data) {
+        Aras.busy(btn, false);
+        if (Aras.report(data)) setTimeout(function () { location.reload(); }, 1200);
+      })
+      .catch(function () {
+        Aras.busy(btn, false);
+        Aras.toast("بازگردانی ناموفق بود.", "error");
+      });
+  });
+
+  /* factory reset */
+  Aras.action(document.getElementById("reset-btn"), function () {
+    var typed = document.getElementById("reset-confirm").value.trim();
+    if (typed !== "DELETE") {
+      Aras.toast("برای تأیید، عبارت DELETE را دقیقاً وارد کنید.", "error", 6000);
+      return;
+    }
+    if (!confirm("همه‌ی داده‌ها پاک شوند؟ این کار برگشت‌ناپذیر است.")) return;
+    return Aras.post("/api/reset", { confirm: typed }).then(function (data) {
+      if (Aras.report(data)) setTimeout(function () { location.href = "/"; }, 1400);
+    });
   });
 
   Aras.action(document.getElementById("save-env"), function () {

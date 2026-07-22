@@ -27,6 +27,8 @@ import asyncio
 import contextlib
 import logging
 import os
+import platform
+import subprocess
 import threading
 import time
 from collections import deque
@@ -467,11 +469,78 @@ def _ca_trusted_cached(force: bool = False) -> bool:
     now = time.time()
     if force or _ca_cache["value"] is None or now - _ca_cache["at"] > _CA_CACHE_TTL:
         try:
-            _ca_cache["value"] = bool(is_ca_trusted(CA_CERT_FILE))
+            _ca_cache["value"] = _really_trusted()
         except Exception:
             _ca_cache["value"] = False
         _ca_cache["at"] = now
     return bool(_ca_cache["value"])
+
+
+def _really_trusted() -> bool:
+    """Report trust the way the *browser* sees it, not the way the OS API does.
+
+    On macOS the upstream check is ``security find-certificate -a -c <name>``,
+    which searches every keychain — including the login keychain that
+    ``install_ca`` writes to without sudo. Chrome and Safari only accept a root
+    CA from the **System** keychain, so that check happily reports "trusted"
+    while the browser still shows ERR_CERT_AUTHORITY_INVALID.
+
+    A status page that says "trusted" when the browser disagrees is worse than
+    no status page, so on macOS we ask the narrower question the browser
+    actually asks.
+    """
+    if not os.path.exists(CA_CERT_FILE):
+        return False
+
+    if platform.system() == "Darwin":
+        return _in_macos_system_keychain()
+
+    return bool(is_ca_trusted(CA_CERT_FILE))
+
+
+def _in_macos_system_keychain() -> bool:
+    """True when the CA sits in /Library/Keychains/System.keychain.
+
+    Reading that keychain does not require sudo — only writing to it does.
+    """
+    try:
+        from mitm import CERT_COMMON_NAME  # optional, older builds lack it
+        name = CERT_COMMON_NAME
+    except Exception:
+        name = _cert_common_name()
+
+    if not name:
+        return False
+    try:
+        result = subprocess.run(
+            ["security", "find-certificate", "-c", name,
+             "/Library/Keychains/System.keychain"],
+            capture_output=True, timeout=10,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _cert_common_name() -> str:
+    """Read the CN straight out of the certificate file."""
+    try:
+        from cryptography import x509
+        with open(CA_CERT_FILE, "rb") as handle:
+            cert = x509.load_pem_x509_certificate(handle.read())
+        return cert.subject.get_attributes_for_oid(
+            x509.oid.NameOID.COMMON_NAME
+        )[0].value
+    except Exception:
+        return ""
+
+
+def macos_trust_command() -> str:
+    """The exact command that makes the CA trusted for browsers on macOS."""
+    return (
+        "sudo security add-trusted-cert -d -r trustRoot "
+        f"-k /Library/Keychains/System.keychain {CA_CERT_FILE}"
+    )
 
 
 def refresh_ca_status() -> bool:

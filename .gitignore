@@ -39,3 +39,7 @@ Thumbs.db
 
 # Temp MITM certs
 domainfront_certs_*/
+
+# Background runner artefacts
+panel/data/panel.pid
+panel/data/panel.log
