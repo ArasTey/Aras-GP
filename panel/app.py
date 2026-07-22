@@ -318,6 +318,32 @@ def create_app() -> Flask:
             license=licensing.check(),
         )
 
+    @app.route("/guide")
+    @security.login_required
+    def guide_page():
+        """Setup walkthrough with the operator's actual progress filled in.
+
+        The checklist reads real state rather than a static list, so someone
+        halfway through setup can see which step they are actually on.
+        """
+        config = store.load_config() or {}
+        script = config.get("script_ids") or config.get("script_id") or ""
+        ids = script if isinstance(script, list) else ([script] if script else [])
+        return render_template(
+            "guide.html",
+            state={
+                "has_config": bool(store.load_config()),
+                "has_auth_key": bool(config.get("auth_key")),
+                "has_worker": bool(store.load()["cloudflare"].get("worker_url")),
+                "has_script": bool([i for i in ids
+                                    if i and i not in configgen.PLACEHOLDER_SCRIPT_IDS]),
+                "ca_trusted": refresh_ca_status(),
+                "listen_host": config.get("listen_host", "127.0.0.1"),
+                "listen_port": config.get("listen_port", 8085),
+                "socks5_port": config.get("socks5_port", 1080),
+            },
+        )
+
     @app.route("/status")
     @security.login_required
     def status_page():

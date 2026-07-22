@@ -1,0 +1,263 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}راهنما — پنل Aras-GP{% endblock %}
+
+{% macro step(n, title, body, tone='') %}
+<div class="ar-step">
+  <div class="ar-step__num ar-num">{{ n }}</div>
+  <div class="ar-step__body">
+    <b>{{ title }}</b>
+    <p>{{ body|safe }}</p>
+  </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<header class="ar-page__head">
+  <div>
+    <h1 class="ar-page__title">راهنما</h1>
+    <p class="ar-page__desc">
+      از صفر تا وصل‌شدن. اگر جایی گیر کردید، بخش «عیب‌یابی» پایین صفحه را ببینید.
+    </p>
+  </div>
+  <div class="ar-row">
+    <span class="ar-pill {% if state.has_config %}ar-pill--on{% else %}ar-pill--off{% endif %}">
+      {{ 'کانفیگ ساخته شده' if state.has_config else 'کانفیگ ندارید' }}
+    </span>
+    <span class="ar-pill {% if relay_running %}ar-pill--on{% else %}ar-pill--off{% endif %}">
+      {{ 'رله روشن' if relay_running else 'رله خاموش' }}
+    </span>
+  </div>
+</header>
+
+<!-- پیشرفت -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('check', 18) }} وضعیت راه‌اندازی شما</h2>
+  </div>
+  <div class="ar-grid ar-grid--4">
+    {% for label, done, where in [
+      ('کلید احراز هویت', state.has_auth_key, url_for('config_page')),
+      ('Worker کلودفلر', state.has_worker, url_for('deploy_page')),
+      ('Apps Script', state.has_script, url_for('deploy_page')),
+      ('گواهی CA', state.ca_trusted, url_for('status_page')),
+    ] %}
+    <a class="ar-card ar-card--hover" href="{{ where }}"
+       style="padding:var(--ar-s4);text-decoration:none">
+      <div class="ar-row" style="gap:var(--ar-s2)">
+        {% if done %}
+          <span class="ar-dot ar-dot--live"></span>
+          <b style="color:var(--ar-mint-400)">انجام شد</b>
+        {% else %}
+          <span class="ar-dot ar-dot--warn"></span>
+          <b style="color:var(--ar-amber-300)">مانده</b>
+        {% endif %}
+      </div>
+      <div class="ar-hint" style="margin-top:4px">{{ label }}</div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- مسیر اصلی -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('rocket', 18) }} راه‌اندازی — شش قدم</h2>
+    <span class="ar-hint">حدود ۱۵ دقیقه</span>
+  </div>
+
+  <div class="ar-steps">
+    {{ step(1, 'ساخت کلید احراز هویت',
+      'به <a href="' ~ url_for('deploy_page') ~ '">دیپلوی</a> بروید و روی دکمه‌ی
+       تولید کلید کنار کادر <span class="ar-mono ar-ltr">auth_key</span> بزنید.
+       این کلید رمز مشترک بین رله‌ی شما و Apps Script است — همان‌جا ذخیره می‌شود.') }}
+
+    {{ step(2, 'دیپلوی Cloudflare Worker',
+      'در همان صفحه، دکمه‌ی «ساخت توکن با دسترسی آماده» صفحه‌ی کلودفلر را با
+       دسترسی‌های لازم از پیش انتخاب‌شده باز می‌کند؛ فقط Continue و Create Token
+       را بزنید. توکن <b>فقط یک بار</b> نمایش داده می‌شود — همان لحظه کپی کنید و
+       در پنل بگذارید، بعد «بررسی توکن» و «دیپلوی Worker».') }}
+
+    {{ step(3, 'ساخت Apps Script',
+      'دکمه‌ی «تولید Code.gs» کد را با کلید و آدرس Worker شما آماده می‌کند.
+       آن را در <span class="ar-mono ar-ltr">script.google.com</span> جای‌گذاری
+       کنید و Deploy → New deployment → <b>Web app</b> بزنید، با
+       Execute as = <b>Me</b> و Who has access = <b>Anyone</b>.
+       آدرس نهایی را در کادر پایین همان صفحه وارد کنید.') }}
+
+    {{ step(4, 'نصب گواهی CA',
+      'در صفحه‌ی <a href="' ~ url_for('status_page') ~ '">وضعیت</a> دکمه‌ی
+       «نصب گواهی» را بزنید. روی macOS معمولاً یک دستور <span class="ar-mono ar-ltr">sudo</span>
+       هم لازم است که همان‌جا نمایش داده می‌شود. بعد مرورگر را <b>کامل</b>
+       ببندید و باز کنید، وگرنه گواهی جدید را نمی‌بیند.') }}
+
+    {{ step(5, 'روشن‌کردن رله',
+      'از نوار کناری دکمه‌ی «راه‌اندازی رله». بعد در
+       <a href="' ~ url_for('dashboard') ~ '">داشبورد</a> روی «تست اتصال رله»
+       بزنید — اگر سبز شد یعنی کل زنجیره کار می‌کند.') }}
+
+    {{ step(6, 'تنظیم مرورگر یا سیستم',
+      'پروکسی را روی <span class="ar-mono ar-ltr">' ~ state.listen_host ~ ':' ~ state.listen_port ~ '</span>
+       (HTTP) یا <span class="ar-mono ar-ltr">' ~ state.listen_host ~ ':' ~ state.socks5_port ~ '</span>
+       (SOCKS5) بگذارید. برای تست: به <span class="ar-mono ar-ltr">https://ip.me</span>
+       بروید — باید IP دیگری غیر از IP خودتان ببینید.') }}
+  </div>
+</section>
+
+<!-- اجرای دائمی -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('power', 18) }} اجرای دائمی</h2>
+  </div>
+  <p class="ar-card__sub">
+    اگر پنل را با <span class="ar-mono ar-ltr">python -m panel</span> در ترمینال اجرا
+    کنید، با بستن ترمینال رله هم قطع می‌شود. برای اجرای مستقل:
+  </p>
+  <div class="ar-grid ar-grid--2">
+    <div class="ar-code">
+      <div class="ar-code__bar"><span class="ar-mono">لینوکس / مک</span>
+        <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#g-sh"
+                data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button></div>
+      <pre id="g-sh">./scripts/aras-panel.sh start
+./scripts/aras-panel.sh status
+./scripts/aras-panel.sh logs
+./scripts/aras-panel.sh stop</pre>
+    </div>
+    <div class="ar-code">
+      <div class="ar-code__bar"><span class="ar-mono">ویندوز</span>
+        <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#g-ps"
+                data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button></div>
+      <pre id="g-ps">.\scripts\aras-panel.ps1 start
+.\scripts\aras-panel.ps1 status
+.\scripts\aras-panel.ps1 logs
+.\scripts\aras-panel.ps1 stop</pre>
+    </div>
+  </div>
+</section>
+
+<!-- چند کاربر -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('users', 18) }} اشتراک با دیگران</h2>
+  </div>
+  <div class="ar-steps">
+    {{ step(1, 'فعال‌کردن احراز هویت',
+      'در <a href="' ~ url_for('users_page') ~ '">کاربران</a> سوییچ بالای صفحه را
+       روشن کنید. تا وقتی خاموش است، پروکسی بدون رمز کار می‌کند.') }}
+    {{ step(2, 'ساخت کاربر',
+      'برای هرکس یک نام کاربری و رمز بسازید. می‌توانید سهمیه‌ی ترافیک (گیگابایت)
+       و تاریخ انقضا بگذارید. رمز <b>فقط همان لحظه</b> نمایش داده می‌شود —
+       بعد از ذخیره قابل بازیابی نیست.') }}
+    {{ step(3, 'باز کردن روی شبکه',
+      'در <a href="' ~ url_for('config_page') ~ '">ساخت کانفیگ</a> گزینه‌ی
+       اشتراک‌گذاری LAN را روشن کنید تا پروکسی روی
+       <span class="ar-mono ar-ltr">0.0.0.0</span> گوش بدهد.') }}
+  </div>
+  <div class="ar-note ar-note--bad" style="margin-top:var(--ar-s4)">
+    {{ icon('alert', 16) }}
+    <div>
+      اگر LAN را باز کنید ولی احراز هویت را روشن نکنید، هر دستگاهی در شبکه
+      بدون رمز از پروکسی شما استفاده می‌کند. این دو همیشه با هم.
+    </div>
+  </div>
+</section>
+
+<!-- AI -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('zap', 18) }} ChatGPT و سرویس‌های AI</h2>
+  </div>
+  <p class="ar-card__sub">
+    ترافیکی که از Cloudflare Workers خارج می‌شود با IP کلودفلر به مقصد می‌رسد و
+    OpenAI آن رنج را مسدود کرده — خطای «Unable to load site» با Ray ID.
+    این داخل رله قابل حل نیست و به یک خروجی دیگر نیاز دارد: یک VPS.
+  </p>
+  <div class="ar-grid ar-grid--2">
+    <div>
+      <h3 class="ar-section-title" style="margin-top:0">روش امن — از مسیر گوگل</h3>
+      <p class="ar-hint" style="line-height:1.9">
+        Worker درخواست را به VPS شما فوروارد می‌کند. ISP همچنان فقط ترافیک گوگل
+        می‌بیند و مقصد IP ثابت VPS شما را. <b>این روش پیشنهادی است.</b>
+      </p>
+      <div class="ar-code" style="margin-top:var(--ar-s3)">
+        <div class="ar-code__bar"><span class="ar-mono">روی VPS</span>
+          <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#g-fwd"
+                  data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button></div>
+        <pre id="g-fwd">sudo bash install-forwarder.sh --domain fwd.example.com
+# یا بدون دامنه:
+sudo bash install-forwarder.sh --tunnel</pre>
+      </div>
+    </div>
+    <div>
+      <h3 class="ar-section-title" style="margin-top:0">روش سریع — مستقیم</h3>
+      <p class="ar-hint" style="line-height:1.9">
+        رله مستقیم به SOCKS5 روی VPS وصل می‌شود. دو هاپ کمتر و سریع‌تر، ولی
+        اتصال به VPS برای ISP قابل دیدن است و Domain Fronting ندارد.
+      </p>
+      <div class="ar-code" style="margin-top:var(--ar-s3)">
+        <div class="ar-code__bar"><span class="ar-mono">روی VPS</span>
+          <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#g-exit"
+                  data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button></div>
+        <pre id="g-exit">sudo bash install-exit-node.sh</pre>
+      </div>
+    </div>
+  </div>
+  <p class="ar-hint" style="margin-top:var(--ar-s4)">
+    هر دو اسکریپت آخر کارشان یک خط به شما می‌دهند که در
+    <a href="{{ url_for('settings_page') }}">تنظیمات</a> وارد می‌کنید.
+    همین کار <b>IP ثابت</b> هم به شما می‌دهد.
+  </p>
+</section>
+
+<!-- عیب‌یابی -->
+<section class="ar-card ar-reveal">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('alert', 18) }} عیب‌یابی</h2>
+  </div>
+  <div class="ar-table-wrap">
+    <table class="ar-table">
+      <thead><tr><th>نشانه</th><th>علت معمول</th><th>راه حل</th></tr></thead>
+      <tbody>
+        {% for sym, cause, fix in [
+          ('خطای گواهی در مرورگر (ERR_CERT_AUTHORITY_INVALID)',
+           'گواهی در System keychain نیست، یا مرورگر restart نشده',
+           'صفحه‌ی وضعیت → نصب گواهی، و دستور sudo که همان‌جا نشان داده می‌شود. بعد مرورگر را کامل ببندید.'),
+          ('«تست اتصال» ناموفق است',
+           'Deployment ID اشتباه، یا Who has access روی Anyone نیست، یا auth_key با Code.gs یکی نیست',
+           'کد را دوباره تولید و در Apps Script جای‌گذاری کنید، و یک deployment تازه بسازید.'),
+          ('همه‌چیز کند است، اولین درخواست ۳ تا ۵ ثانیه',
+           'Apps Script باید container را بیدار کند',
+           'چند Deployment ID اضافه کنید و parallel_relay را ۲ یا ۳ بگذارید.'),
+          ('ChatGPT باز نمی‌شود ولی بقیه‌ی سایت‌ها کار می‌کنند',
+           'IP خروجی Cloudflare است و بلاک شده',
+           'بخش AI بالا — فورواردر روی VPS راه بیندازید.'),
+          ('با بستن ترمینال قطع می‌شود',
+           'پنل به ترمینال وابسته اجرا شده',
+           'به‌جای python -m panel از scripts/aras-panel.sh start استفاده کنید.'),
+          ('رمز پنل را فراموش کرده‌ام',
+           '—',
+           'فایل panel/data/panel.json را پاک کنید تا پنل دوباره وارد مرحله‌ی راه‌اندازی اولیه شود. کانفیگ و کاربران باقی می‌مانند.'),
+          ('پورت اشغال است',
+           'نمونه‌ی دیگری از پنل یا رله در حال اجراست',
+           'scripts/aras-panel.sh stop، یا پورت‌ها را در ساخت کانفیگ عوض کنید.'),
+        ] %}
+        <tr>
+          <td><b>{{ sym }}</b></td>
+          <td class="ar-hint">{{ cause }}</td>
+          <td>{{ fix }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ar-note ar-note--info" style="margin-top:var(--ar-s5)">
+    {{ icon('info', 16) }}
+    <div>
+      هر خطایی دیدید، اول <a href="{{ url_for('status_page') }}">وضعیت → لاگ زنده‌ی رله</a>
+      را نگاه کنید. لاگ فقط در حافظه است، روی دیسک نوشته نمی‌شود، و هرگز
+      <span class="ar-mono ar-ltr">auth_key</span> یا رمز کاربران را نشان نمی‌دهد.
+    </div>
+  </div>
+</section>
+{% endblock %}
