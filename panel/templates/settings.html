@@ -1,0 +1,180 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}تنظیمات — پنل Aras-GP{% endblock %}
+
+{% block content %}
+<header class="ar-page__head">
+  <div>
+    <h1 class="ar-page__title">تنظیمات</h1>
+    <p class="ar-page__desc">
+      تنظیمات خود پنل، ویرایش پیشرفته‌ی اجزای دیپلوی، و وضعیت لایسنس.
+    </p>
+  </div>
+</header>
+
+<form method="post" action="{{ url_for('settings_page') }}" class="ar-stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <section class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('gear', 18) }} رفتار پنل</h2>
+    </div>
+    <div class="ar-stack" style="gap:var(--ar-s5)">
+      <label class="ar-switch">
+        <input type="checkbox" name="auto_start_relay" {% if settings.auto_start_relay %}checked{% endif %}>
+        <span class="ar-switch__track"></span>
+        <span class="ar-switch__text">
+          <b>راه‌اندازی خودکار رله هنگام اجرای پنل</b>
+          <span>اگر کانفیگ معتبر باشد، رله بلافاصله بالا می‌آید.</span>
+        </span>
+      </label>
+
+      <label class="ar-switch">
+        <input type="checkbox" name="remember_cloudflare_token"
+               {% if settings.remember_cloudflare_token %}checked{% endif %}>
+        <span class="ar-switch__track"></span>
+        <span class="ar-switch__text">
+          <b>پیشنهاد ذخیره‌ی توکن کلودفلر</b>
+          <span>فقط تیک پیش‌فرض فرم دیپلوی را تعیین می‌کند؛ ذخیره همچنان دستی است.</span>
+        </span>
+      </label>
+
+      <div class="ar-field" style="max-width:280px">
+        <label class="ar-label" for="chart_window">تعداد نمونه‌های نمودار</label>
+        <input class="ar-input ar-num" type="number" id="chart_window" name="chart_window"
+               value="{{ settings.chart_window }}" min="30" max="720" step="10" dir="ltr">
+        <span class="ar-hint">هر نمونه ۵ ثانیه — ۱۲۰ نمونه یعنی ۱۰ دقیقه.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('lock', 18) }} رمز پنل</h2>
+    </div>
+    <div class="ar-grid ar-grid--2">
+      <div class="ar-field">
+        <label class="ar-label" for="panel_password">رمز جدید</label>
+        <input class="ar-input" type="password" id="panel_password" name="panel_password"
+               dir="ltr" autocomplete="new-password" minlength="10">
+        <span class="ar-hint">خالی بگذارید تا تغییری نکند. حداقل ۱۰ کاراکتر.</span>
+      </div>
+      <div class="ar-field">
+        <label class="ar-label" for="panel_password_confirm">تکرار رمز جدید</label>
+        <input class="ar-input" type="password" id="panel_password_confirm"
+               name="panel_password_confirm" dir="ltr" autocomplete="new-password">
+      </div>
+    </div>
+  </section>
+
+  <div class="ar-row ar-row--end">
+    <button class="ar-btn ar-btn--primary" type="submit">
+      {{ icon('save', 16) }}<span>ذخیره‌ی تنظیمات</span>
+    </button>
+  </div>
+</form>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('cloud', 18) }} Upstream Forwarder</h2>
+  </div>
+  <p class="ar-card__sub">
+    محتوای <span class="ar-mono ar-ltr">deploy/upstream_forwarder/.env</span>.
+    این کامپوننت اختیاری است و برای وقتی به کار می‌آید که به یک IP خروجی ثابت نیاز دارید.
+    فایل با دسترسی ۰۶۰۰ نوشته می‌شود.
+  </p>
+  <div class="ar-field">
+    <textarea class="ar-textarea ar-ltr" id="forwarder-env" rows="6"
+              spellcheck="false">{{ forwarder_env }}</textarea>
+    <span class="ar-hint">
+      مقادیر معمول: <span class="ar-mono ar-ltr">DOMAIN</span> و
+      <span class="ar-mono ar-ltr">LETSENCRYPT_EMAIL</span>.
+    </span>
+  </div>
+  <div class="ar-row ar-row--end" style="margin-top:var(--ar-s4)">
+    <button class="ar-btn" id="save-env" type="button">
+      {{ icon('save', 15) }}<span>ذخیره‌ی .env</span>
+    </button>
+  </div>
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('shield', 18) }} لایسنس</h2>
+    {% if license.required %}
+      {% if license.valid %}<span class="ar-pill ar-pill--on">معتبر</span>
+      {% else %}<span class="ar-pill ar-pill--bad">نامعتبر</span>{% endif %}
+    {% else %}
+      <span class="ar-pill ar-pill--off">بدون قفل</span>
+    {% endif %}
+  </div>
+  <p class="ar-card__sub">{{ license.message }}</p>
+
+  <div class="ar-note ar-note--info">
+    {{ icon('info', 16) }}
+    <div>
+      بررسی لایسنس کاملاً <b>آفلاین</b> است: یک امضای Ed25519 که به‌صورت محلی
+      اعتبارسنجی می‌شود. هیچ تماس شبکه‌ای، هیچ فعال‌سازی از راه دور و هیچ
+      کیل‌سوییچی وجود ندارد — چون ابزاری که برای عبور از سانسور ساخته شده
+      نباید خودش یک نقطه‌ی تماس مرکزی داشته باشد.
+    </div>
+  </div>
+
+  {% if license.valid and license.payload %}
+  <div class="ar-grid ar-grid--2" style="margin-top:var(--ar-s4)">
+    <div class="ar-row ar-row--between">
+      <span class="ar-hint">دارنده</span><b>{{ license.payload.licensee }}</b>
+    </div>
+    <div class="ar-row ar-row--between">
+      <span class="ar-hint">انقضا</span>
+      <b class="ar-num" data-epoch="{{ license.payload.expires_at or '' }}">
+        {{ 'دائمی' if not license.payload.expires_at else '' }}</b>
+    </div>
+  </div>
+  {% endif %}
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('eye', 18) }} شفافیت شبکه</h2>
+  </div>
+  <p class="ar-card__sub">
+    فهرست کامل مقصدهایی که این پنل با آن‌ها ارتباط می‌گیرد — هیچ مورد دیگری وجود ندارد:
+  </p>
+  <div class="ar-stack" style="gap:var(--ar-s3)">
+    <div class="ar-row ar-row--between">
+      <span><span class="ar-mono ar-ltr">api.cloudflare.com</span></span>
+      <span class="ar-hint">فقط هنگام بررسی توکن یا دیپلوی Worker</span>
+    </div>
+    <div class="ar-row ar-row--between">
+      <span><span class="ar-mono ar-ltr">{{ cfg.get('front_domain', 'www.google.com') }}</span>
+            → script.google.com</span>
+      <span class="ar-hint">توسط خود موتور رله، به Apps Script شما</span>
+    </div>
+    <hr class="ar-divider" style="margin:var(--ar-s2) 0">
+    <div class="ar-row" style="gap:var(--ar-s2)">
+      {{ icon('ban', 15) }}
+      <span class="ar-hint">
+        بدون تله‌متری، بدون آنالیتیکس، بدون بررسی به‌روزرسانی، بدون سرور لایسنس،
+        و بدون هیچ CDN خارجی (تمام فونت‌ها، آیکون‌ها و اسکریپت‌ها محلی هستند).
+      </span>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  document.querySelectorAll("[data-epoch]").forEach(function (node) {
+    if (node.dataset.epoch) node.textContent = Aras.dateTime(node.dataset.epoch);
+  });
+
+  Aras.action(document.getElementById("save-env"), function () {
+    return Aras.post("/api/settings/forwarder-env", {
+      content: document.getElementById("forwarder-env").value
+    }).then(function (data) { Aras.report(data); });
+  });
+})();
+</script>
+{% endblock %}

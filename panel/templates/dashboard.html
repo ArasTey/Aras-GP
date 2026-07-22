@@ -1,0 +1,278 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}داشبورد — پنل Aras-GP{% endblock %}
+
+{% block content %}
+<header class="ar-page__head">
+  <div>
+    <h1 class="ar-page__title">داشبورد</h1>
+    <p class="ar-page__desc">
+      آمار زنده مستقیماً از موتور رله در حال اجرا خوانده می‌شود
+      (<span class="ar-mono ar-ltr">DomainFronter.stats_snapshot()</span>)، نه از روی لاگ.
+    </p>
+  </div>
+  <div class="ar-row">
+    <button class="ar-btn ar-btn--sm" id="btn-test">
+      {{ icon('zap', 15) }}<span>تست اتصال رله</span>
+    </button>
+    <a class="ar-btn ar-btn--sm" href="{{ url_for('status_page') }}">
+      {{ icon('pulse', 15) }}<span>وضعیت کامل</span>
+    </a>
+  </div>
+</header>
+
+{% if not status.running %}
+<div class="ar-note ar-note--warn ar-reveal" style="margin-bottom:var(--ar-s5)">
+  {{ icon('alert', 18) }}
+  <div>
+    <b>رله خاموش است.</b> برای دیدن آمار زنده، از نوار کناری رله را روشن کنید.
+    اگر هنوز کانفیگ نساخته‌اید، ابتدا به بخش
+    <a href="{{ url_for('config_page') }}">ساخت کانفیگ</a> بروید.
+  </div>
+</div>
+{% endif %}
+
+<section class="ar-grid ar-grid--4" style="margin-bottom:var(--ar-s5)">
+  <article class="ar-card ar-stat ar-card--hover ar-reveal ar-stat--blue">
+    <div class="ar-stat__top">
+      <span class="ar-stat__label">سایت‌های اخیر</span>
+      <span class="ar-stat__icon">{{ icon('globe', 17) }}</span>
+    </div>
+    <div class="ar-stat__value ar-num" id="m-sites">0</div>
+    <div class="ar-stat__foot" id="m-requests">0 درخواست</div>
+  </article>
+
+  <article class="ar-card ar-stat ar-card--hover ar-reveal">
+    <div class="ar-stat__top">
+      <span class="ar-stat__label">حجم ترافیک</span>
+      <span class="ar-stat__icon">{{ icon('chart', 17) }}</span>
+    </div>
+    <div class="ar-stat__value ar-num" id="m-bytes">0<span class="ar-stat__unit">بایت</span></div>
+    <div class="ar-stat__foot" id="m-speed">0 بایت/ث</div>
+  </article>
+
+  <article class="ar-card ar-stat ar-card--hover ar-reveal ar-stat--amber">
+    <div class="ar-stat__top">
+      <span class="ar-stat__label">میانگین تأخیر</span>
+      <span class="ar-stat__icon">{{ icon('clock', 17) }}</span>
+    </div>
+    <div class="ar-stat__value ar-num" id="m-latency">0<span class="ar-stat__unit">میلی‌ثانیه</span></div>
+    <div class="ar-stat__foot" id="m-errors">بدون خطا</div>
+  </article>
+
+  <article class="ar-card ar-stat ar-card--hover ar-reveal ar-stat--mint">
+    <div class="ar-stat__top">
+      <span class="ar-stat__label">وضعیت رله</span>
+      <span class="ar-stat__icon">{{ icon('power', 17) }}</span>
+    </div>
+    <div class="ar-stat__value" id="m-state" style="font-size:var(--ar-t-xl)">
+      {{ 'روشن' if status.running else 'خاموش' }}
+    </div>
+    <div class="ar-stat__foot" id="m-uptime">—</div>
+  </article>
+</section>
+
+<section class="ar-grid ar-grid--sidebar" style="margin-bottom:var(--ar-s5)">
+  <article class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('chart', 18) }} نرخ عبور ترافیک</h2>
+      <div class="ar-legend">
+        <span><i style="background:linear-gradient(90deg,#2F83F6,#7C5CFF)"></i> سرعت لحظه‌ای</span>
+        <span class="ar-num" id="chart-window">{{ (chart_window * 5 // 60) }} دقیقه اخیر</span>
+      </div>
+    </div>
+    <div class="ar-chart">
+      <canvas id="chart-throughput"></canvas>
+      <div class="ar-chart__empty" id="chart-empty">
+        {{ icon('pulse', 26) }}
+        <span>هنوز نمونه‌ای ثبت نشده است. نمونه‌برداری هر ۵ ثانیه انجام می‌شود.</span>
+      </div>
+    </div>
+  </article>
+
+  <article class="ar-card ar-reveal">
+    <div class="ar-card__head">
+      <h2 class="ar-card__title">{{ icon('server', 18) }} سلامت مسیر</h2>
+    </div>
+    <div class="ar-stack" style="gap:var(--ar-s4)">
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">دامنه‌ی فرانت</span>
+        <span class="ar-mono ar-ltr">{{ status.front_domain }}</span>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">IP گوگل</span>
+        <span class="ar-mono ar-ltr">{{ status.google_ip or '—' }}</span>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">تعداد اسکریپت</span>
+        <span class="ar-num">{{ status.script_count }}</span>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">رله موازی</span>
+        <span class="ar-num">{{ status.parallel_relay }}</span>
+      </div>
+      <hr class="ar-divider" style="margin:0">
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">اسکریپت‌های بلاک‌شده</span>
+        <span id="m-blacklist" class="ar-pill ar-pill--off">0</span>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">اتصال‌های باز</span>
+        <span id="m-conns" class="ar-pill ar-pill--info ar-num">0</span>
+      </div>
+      <div class="ar-row ar-row--between">
+        <span class="ar-hint">آخرین موفقیت</span>
+        <span id="m-last-success">—</span>
+      </div>
+      <div id="sni-pool" class="ar-hint" style="line-height:2"></div>
+    </div>
+  </article>
+</section>
+
+<section class="ar-card ar-reveal">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('globe', 18) }} پرترافیک‌ترین میزبان‌ها</h2>
+    <span class="ar-hint" id="site-count"></span>
+  </div>
+  <div class="ar-table-wrap">
+    <table class="ar-table">
+      <thead>
+        <tr>
+          <th>میزبان</th>
+          <th>درخواست</th>
+          <th>خطا</th>
+          <th>حجم</th>
+          <th>میانگین تأخیر</th>
+        </tr>
+      </thead>
+      <tbody id="sites-body">
+        <tr><td colspan="5">
+          <div class="ar-empty">
+            {{ icon('globe', 28) }}
+            <b>هنوز ترافیکی رد و بدل نشده</b>
+            <span>پس از روشن‌کردن رله و باز کردن یک سایت، اینجا پر می‌شود.</span>
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  // Window length comes from Settings; each sample is 5 s.
+  var CHART_POINTS = {{ chart_window }};
+
+  var chart = new Aras.Chart(document.getElementById("chart-throughput"), {
+    color: "#7C5CFF", color2: "#2F83F6",
+    format: function (v) { return Aras.speed(v); }
+  });
+
+  var els = {
+    sites: document.getElementById("m-sites"),
+    requests: document.getElementById("m-requests"),
+    bytes: document.getElementById("m-bytes"),
+    speed: document.getElementById("m-speed"),
+    latency: document.getElementById("m-latency"),
+    errors: document.getElementById("m-errors"),
+    state: document.getElementById("m-state"),
+    uptime: document.getElementById("m-uptime"),
+    blacklist: document.getElementById("m-blacklist"),
+    conns: document.getElementById("m-conns"),
+    lastSuccess: document.getElementById("m-last-success"),
+    sniPool: document.getElementById("sni-pool"),
+    siteCount: document.getElementById("site-count"),
+    sitesBody: document.getElementById("sites-body"),
+    chartEmpty: document.getElementById("chart-empty"),
+    relayDot: document.getElementById("relay-dot"),
+    relayState: document.getElementById("relay-state")
+  };
+
+  function renderSites(rows) {
+    if (!rows.length) return;   // keep the empty state
+    els.sitesBody.innerHTML = rows.slice(0, 25).map(function (row) {
+      var traffic = Aras.bytes(row.bytes);
+      var errClass = row.errors > 0 ? "ar-pill ar-pill--bad" : "ar-pill ar-pill--off";
+      return "<tr>" +
+        '<td><span class="ar-mono ar-ltr">' + Aras.escape(row.host) + "</span></td>" +
+        '<td class="ar-num">' + Aras.number(row.requests) + "</td>" +
+        '<td><span class="' + errClass + ' ar-num">' + Aras.number(row.errors) + "</span></td>" +
+        '<td class="ar-num">' + traffic.value + " " + traffic.unit + "</td>" +
+        '<td class="ar-num">' + Aras.number(Math.round(row.avg_ms)) + " ms</td>" +
+        "</tr>";
+    }).join("");
+    els.siteCount.textContent = "نمایش " + Math.min(25, rows.length) +
+      " از " + Aras.number(rows.length) + " میزبان";
+  }
+
+  function tick() {
+    Aras.api("/api/stats?points=" + CHART_POINTS).then(function (data) {
+      if (!data.ok) return;
+      var s = data.status;
+      var series = data.series || [];
+
+      els.sites.textContent = Aras.number(s.sites);
+      els.requests.textContent = Aras.number(s.requests) + " درخواست";
+
+      var traffic = Aras.bytes(s.bytes);
+      els.bytes.innerHTML = traffic.value +
+        '<span class="ar-stat__unit">' + traffic.unit + "</span>";
+
+      var latest = series.length ? series[series.length - 1] : null;
+      els.speed.textContent = latest ? Aras.speed(latest.bps) : "0 بایت/ث";
+
+      els.latency.innerHTML = Aras.number(Math.round(s.avg_ms)) +
+        '<span class="ar-stat__unit">میلی‌ثانیه</span>';
+      els.errors.textContent = s.errors ? Aras.number(s.errors) + " خطا" : "بدون خطا";
+
+      els.state.textContent = s.running ? "روشن" : "خاموش";
+      els.uptime.textContent = s.running ? Aras.duration(s.uptime) : "متوقف";
+
+      els.blacklist.textContent = Aras.number(data.blacklisted_scripts.length);
+      els.blacklist.className = data.blacklisted_scripts.length
+        ? "ar-pill ar-pill--warn ar-num" : "ar-pill ar-pill--off ar-num";
+      els.conns.textContent = Aras.number(s.connections);
+      els.lastSuccess.textContent = Aras.ago(s.last_success_at);
+
+      if (data.sni_rotation && data.sni_rotation.length) {
+        els.sniPool.innerHTML = "چرخش SNI: " + data.sni_rotation.map(function (h) {
+          return '<span class="ar-pill ar-pill--off ar-mono">' + Aras.escape(h) + "</span>";
+        }).join(" ");
+      }
+
+      if (els.relayDot) els.relayDot.className = "ar-dot" + (s.running ? " ar-dot--live" : "");
+      if (els.relayState) {
+        els.relayState.textContent = s.running ? "روشن" : "خاموش";
+        els.relayState.className = "ar-relay__state ar-relay__state--" + (s.running ? "on" : "off");
+      }
+
+      renderSites(data.per_site || []);
+
+      if (series.length > 1) {
+        els.chartEmpty.style.display = "none";
+        chart.render(series.map(function (p) { return p.bps; }));
+        document.getElementById("chart-window").textContent =
+          Math.round(series.length * 5 / 60) + " دقیقه اخیر";
+      }
+    });
+  }
+
+  tick();
+  setInterval(tick, 5000);
+
+  Aras.action(document.getElementById("btn-test"), function () {
+    return Aras.post("/api/relay/test").then(function (result) {
+      if (result.ok) {
+        Aras.toast("مسیر رله سالم است — کد " + result.status +
+                   " در " + result.ms + " میلی‌ثانیه.", "success", 6000);
+      } else {
+        Aras.toast(result.error || ("پاسخ نامنتظره از رله (کد " + (result.status || 0) + ")"),
+                   "error", 7000);
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

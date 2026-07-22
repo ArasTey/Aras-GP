@@ -1,0 +1,344 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}دیپلوی — پنل Aras-GP{% endblock %}
+
+{% block content %}
+<header class="ar-page__head">
+  <div>
+    <h1 class="ar-page__title">دیپلوی</h1>
+    <p class="ar-page__desc">
+      زنجیره‌ی رله دو حلقه دارد: Cloudflare Worker (کاملاً خودکار) و
+      Google Apps Script (نیمه‌خودکار). ابتدا Worker را بالا بیاورید تا آدرسش
+      داخل کد Apps Script جای‌گذاری شود.
+    </p>
+  </div>
+</header>
+
+<!-- ── مرحله ۱: Cloudflare ─────────────────────────────────────── -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('cloud', 18) }} مرحله ۱ — Cloudflare Worker</h2>
+    <span class="ar-pill ar-pill--on">خودکار</span>
+  </div>
+  <p class="ar-card__sub">
+    پنل با REST API کلودفلر فایل <span class="ar-mono ar-ltr">deploy/cloudflare-worker/worker.js</span>
+    را به‌صورت ES module آپلود می‌کند، زیردامنه‌ی workers.dev را پیدا و فعال می‌کند،
+    و مقدار <span class="ar-mono ar-ltr">WORKER_URL</span> داخل خود Worker را با
+    آدرس واقعی‌اش جایگزین می‌کند.
+  </p>
+
+  <div class="ar-grid ar-grid--2">
+    <div class="ar-field">
+      <label class="ar-label" for="cf-token">{{ icon('key', 15) }} API Token</label>
+      <input class="ar-input ar-mono" type="password" id="cf-token" dir="ltr"
+             placeholder="{{ token_hint or 'توکن با دسترسی Edit Cloudflare Workers' }}"
+             autocomplete="off">
+      <span class="ar-hint">
+        دسترسی لازم: <b>Account → Workers Scripts → Edit</b>.
+        {% if token_saved %}
+          یک توکن ذخیره‌شده موجود است؛ اگر این کادر را خالی بگذارید از همان استفاده می‌شود.
+          <a href="#" id="cf-forget">حذف توکن ذخیره‌شده</a>
+        {% endif %}
+      </span>
+    </div>
+
+    <div class="ar-field">
+      <label class="ar-label" for="cf-account">{{ icon('server', 15) }} Account ID</label>
+      <div class="ar-input-group">
+        <input class="ar-input ar-mono" type="text" id="cf-account" dir="ltr"
+               value="{{ cf.account_id }}" placeholder="۳۲ کاراکتر هگز">
+        <button class="ar-btn ar-btn--sm" id="cf-verify" type="button">
+          {{ icon('check', 14) }}<span>بررسی توکن</span>
+        </button>
+      </div>
+      <span class="ar-hint" id="cf-accounts-hint">
+        اگر Account ID را نمی‌دانید، «بررسی توکن» را بزنید تا حساب‌های در دسترس فهرست شوند.
+      </span>
+    </div>
+
+    <div class="ar-field">
+      <label class="ar-label" for="cf-name">{{ icon('code', 15) }} نام Worker</label>
+      <input class="ar-input ar-mono" type="text" id="cf-name" dir="ltr"
+             value="{{ cf.script_name or 'aras-relay' }}" placeholder="aras-relay">
+      <span class="ar-hint">فقط حروف کوچک، عدد و خط تیره.</span>
+    </div>
+
+    <div class="ar-field">
+      <label class="ar-label" for="cf-upstream">{{ icon('link', 15) }} آدرس Upstream Forwarder (اختیاری)</label>
+      <input class="ar-input ar-mono" type="text" id="cf-upstream" dir="ltr"
+             value="{{ cf.upstream_forwarder_url }}" placeholder="https://forwarder.example.com">
+      <span class="ar-hint">
+        اگر از کامپوننت <span class="ar-mono ar-ltr">deploy/upstream_forwarder</span>
+        استفاده می‌کنید، این مقدار به‌عنوان متغیر
+        <span class="ar-mono ar-ltr">UPSTREAM_FORWARDER_URL</span> به Worker بایند می‌شود.
+      </span>
+    </div>
+  </div>
+
+  <div class="ar-row" style="margin-top:var(--ar-s5)">
+    <label class="ar-switch">
+      <input type="checkbox" id="cf-remember" {% if token_saved %}checked{% endif %}>
+      <span class="ar-switch__track"></span>
+      <span class="ar-switch__text">
+        <b>ذخیره‌ی توکن</b>
+        <span>در فایل محلی با دسترسی ۰۶۰۰ ذخیره می‌شود؛ پیش‌فرض خاموش است.</span>
+      </span>
+    </label>
+    <span class="ar-spacer"></span>
+    <button class="ar-btn ar-btn--primary" id="cf-deploy" type="button">
+      {{ icon('rocket', 16) }}<span>دیپلوی Worker</span>
+    </button>
+  </div>
+
+  <div id="cf-result" style="margin-top:var(--ar-s5)"></div>
+
+  {% if cf.worker_url %}
+  <div class="ar-note ar-note--info" style="margin-top:var(--ar-s5)">
+    {{ icon('check', 16) }}
+    <div>
+      آخرین Worker مستقرشده:
+      <span class="ar-mono ar-ltr" id="cf-current-url">{{ cf.worker_url }}</span>
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#cf-current-url"
+              data-copy-label="آدرس Worker" type="button">{{ icon('copy', 13) }}</button>
+    </div>
+  </div>
+  {% endif %}
+</section>
+
+<!-- ── مرحله ۲: Apps Script ────────────────────────────────────── -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('file', 18) }} مرحله ۲ — Google Apps Script</h2>
+    <span class="ar-pill ar-pill--warn">نیمه‌خودکار</span>
+  </div>
+
+  <div class="ar-note ar-note--warn" style="margin-bottom:var(--ar-s5)">
+    {{ icon('info', 16) }}
+    <div>
+      <b>چرا این مرحله خودکار نیست؟</b>
+      دیپلوی کامل Apps Script از طریق API نیازمند یک OAuth2 Client ثبت‌شده در
+      Google Cloud، فعال‌سازی Apps Script API روی حساب شما و انتشار صفحه‌ی رضایت
+      کاربر است. آن مسیر برای کاربر عادی سنگین‌تر از انجام دستی همین شش مرحله است،
+      بنابراین پنل کد آماده را تولید می‌کند و شما فقط جای‌گذاری و Deploy می‌کنید.
+    </div>
+  </div>
+
+  <div class="ar-grid ar-grid--sidebar">
+    <div>
+      <div class="ar-field" style="margin-bottom:var(--ar-s4)">
+        <label class="ar-label" for="gas-worker-url">{{ icon('link', 15) }} آدرس Worker</label>
+        <input class="ar-input ar-mono" type="text" id="gas-worker-url" dir="ltr"
+               value="{{ cf.worker_url }}" placeholder="https://aras-relay.username.workers.dev">
+        <span class="ar-hint">
+          پس از دیپلوی مرحله‌ی ۱ خودکار پر می‌شود. اگر Worker را دستی از داشبورد
+          کلودفلر ساخته‌اید، آدرسش را همین‌جا وارد کنید.
+        </span>
+      </div>
+
+      <div class="ar-row" style="margin-bottom:var(--ar-s3)">
+        <button class="ar-btn ar-btn--accent" id="gas-generate" type="button">
+          {{ icon('code', 16) }}<span>تولید Code.gs</span>
+        </button>
+        <button class="ar-btn ar-btn--sm" id="gas-copy" type="button" disabled>
+          {{ icon('copy', 14) }}<span>کپی کد</span>
+        </button>
+        {% if not auth_key_set %}
+          <span class="ar-pill ar-pill--bad">{{ icon('alert', 13) }} اول auth_key را بسازید</span>
+        {% endif %}
+      </div>
+
+      <div class="ar-code">
+        <div class="ar-code__bar">
+          <span class="ar-mono">Code.gs</span>
+          <span id="gas-status">هنوز تولید نشده</span>
+        </div>
+        <pre id="gas-code">// روی «تولید Code.gs» بزنید تا کد با AUTH_KEY و WORKER_URL شما ساخته شود.</pre>
+      </div>
+
+      <div class="ar-field" style="margin-top:var(--ar-s5)">
+        <label class="ar-label" for="gas-deployment">{{ icon('link', 15) }} Deployment ID یا آدرس exec</label>
+        <div class="ar-input-group">
+          <input class="ar-input ar-mono" type="text" id="gas-deployment" dir="ltr"
+                 placeholder="https://script.google.com/macros/s/…/exec">
+          <button class="ar-btn ar-btn--primary" id="gas-save" type="button">
+            {{ icon('save', 15) }}<span>ثبت در کانفیگ</span>
+          </button>
+        </div>
+        <span class="ar-hint">
+          هم آدرس کامل و هم فقط شناسه پذیرفته می‌شود. شناسه‌ی جدید به فهرست
+          <span class="ar-mono ar-ltr">script_id</span> اضافه می‌شود (چند اسکریپت = پهنای باند بیشتر).
+        </span>
+      </div>
+
+      {% if gas.deployment_ids %}
+      <div class="ar-row" style="margin-top:var(--ar-s3)">
+        <span class="ar-hint">شناسه‌های ثبت‌شده:</span>
+        {% for did in gas.deployment_ids %}
+          <span class="ar-pill ar-pill--info ar-mono">…{{ did[-10:] }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div>
+      <h3 class="ar-section-title" style="margin-top:0">راهنمای گام‌به‌گام</h3>
+      <div class="ar-steps">
+        {% for step in gas_steps %}
+        <div class="ar-step">
+          <div class="ar-step__num ar-num">{{ loop.index }}</div>
+          <div class="ar-step__body">
+            <b>{{ step.title }}</b>
+            <p>{{ step.body }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── تاریخچه ─────────────────────────────────────────────────── -->
+{% if history %}
+<section class="ar-card ar-reveal">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('clock', 18) }} تاریخچه‌ی دیپلوی</h2>
+  </div>
+  <div class="ar-table-wrap">
+    <table class="ar-table">
+      <thead><tr><th>زمان</th><th>نوع</th><th>نتیجه</th><th>جزئیات</th></tr></thead>
+      <tbody>
+        {% for item in history %}
+        <tr>
+          <td class="ar-num" data-epoch="{{ item.at }}">—</td>
+          <td>{{ 'Cloudflare' if item.kind == 'cloudflare' else item.kind }}</td>
+          <td>
+            {% if item.ok %}<span class="ar-pill ar-pill--on">موفق</span>
+            {% else %}<span class="ar-pill ar-pill--bad">ناموفق</span>{% endif %}
+          </td>
+          <td class="ar-mono ar-ltr" style="font-size:12px">
+            {{ item.worker_url or item.error or item.script_name or '—' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  var token = document.getElementById("cf-token");
+  var account = document.getElementById("cf-account");
+  var name = document.getElementById("cf-name");
+  var upstream = document.getElementById("cf-upstream");
+  var remember = document.getElementById("cf-remember");
+  var result = document.getElementById("cf-result");
+
+  document.querySelectorAll("[data-epoch]").forEach(function (cell) {
+    cell.textContent = Aras.dateTime(cell.dataset.epoch);
+  });
+
+  Aras.action(document.getElementById("cf-verify"), function () {
+    return Aras.post("/api/cloudflare/verify", { api_token: token.value }).then(function (data) {
+      if (!data.ok) { Aras.toast(data.error, "error", 7000); return; }
+      Aras.toast("توکن معتبر است (" + data.status + ").", "success");
+      var hint = document.getElementById("cf-accounts-hint");
+      if (data.accounts && data.accounts.length) {
+        hint.innerHTML = "حساب‌های در دسترس: " + data.accounts.map(function (acc) {
+          return '<a href="#" class="ar-mono ar-ltr" data-account="' + Aras.escape(acc.id) +
+                 '">' + Aras.escape(acc.name) + "</a>";
+        }).join(" ، ");
+        hint.querySelectorAll("[data-account]").forEach(function (link) {
+          link.addEventListener("click", function (event) {
+            event.preventDefault();
+            account.value = link.dataset.account;
+            Aras.toast("Account ID پر شد.", "info", 2500);
+          });
+        });
+      }
+    });
+  });
+
+  Aras.action(document.getElementById("cf-deploy"), function () {
+    result.innerHTML = "";
+    return Aras.post("/api/cloudflare/deploy", {
+      api_token: token.value,
+      account_id: account.value,
+      script_name: name.value,
+      upstream_forwarder_url: upstream.value,
+      remember_token: remember.checked ? "1" : ""
+    }).then(function (data) {
+      if (!data.ok) {
+        Aras.toast(data.error, "error", 9000);
+        result.innerHTML = '<div class="ar-note ar-note--bad">' +
+          '<div>' + Aras.escape(data.error) + "</div></div>";
+        return;
+      }
+      token.value = "";
+      gasWorkerUrl.value = data.worker_url;   // hand step 2 the fresh URL
+      Aras.toast("Worker با موفقیت مستقر شد.", "success");
+      result.innerHTML =
+        '<div class="ar-note ar-note--info"><div>' +
+        "<b>آدرس Worker:</b> " +
+        '<span class="ar-mono ar-ltr" id="cf-new-url">' + Aras.escape(data.worker_url) + "</span> " +
+        '<button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#cf-new-url" ' +
+        'data-copy-label="آدرس Worker" type="button">کپی</button>' +
+        "<ul style='margin:8px 0 0;padding-inline-start:18px'>" +
+        data.steps.map(function (step) {
+          return "<li>" + Aras.escape(step.label) +
+                 (step.detail ? ' — <span class="ar-mono ar-ltr">' +
+                  Aras.escape(step.detail) + "</span>" : "") + "</li>";
+        }).join("") + "</ul></div></div>";
+    });
+  });
+
+  var forget = document.getElementById("cf-forget");
+  if (forget) {
+    forget.addEventListener("click", function (event) {
+      event.preventDefault();
+      Aras.post("/api/cloudflare/forget-token").then(function (data) {
+        if (Aras.report(data)) setTimeout(function () { location.reload(); }, 700);
+      });
+    });
+  }
+
+  /* ── Apps Script ── */
+  var codeBox = document.getElementById("gas-code");
+  var copyBtn = document.getElementById("gas-copy");
+
+  var gasWorkerUrl = document.getElementById("gas-worker-url");
+
+  Aras.action(document.getElementById("gas-generate"), function () {
+    // Prefer a URL just deployed in this session, then the saved one, then
+    // whatever the operator typed by hand.
+    var deployed = (document.getElementById("cf-new-url") || {}).textContent || "";
+    var workerUrl = (deployed || gasWorkerUrl.value || "").trim();
+    gasWorkerUrl.value = workerUrl;
+    return Aras.post("/api/gas/code", { worker_url: workerUrl }).then(function (data) {
+      if (!data.ok) { Aras.toast(data.error, "error", 8000); return; }
+      codeBox.textContent = data.code;
+      copyBtn.disabled = false;
+      document.getElementById("gas-status").textContent = "آماده — با مقادیر شما پر شد";
+      Aras.toast("کد Apps Script تولید شد.", "success");
+    });
+  });
+
+  copyBtn.addEventListener("click", function () {
+    Aras.copy(codeBox.textContent, "کد Code.gs");
+  });
+
+  Aras.action(document.getElementById("gas-save"), function () {
+    var value = document.getElementById("gas-deployment").value;
+    return Aras.post("/api/gas/deployment-id", { deployment_id: value }).then(function (data) {
+      if (!data.ok) { Aras.toast(data.error, "error", 8000); return; }
+      Aras.toast("شناسه ثبت شد — اکنون " + data.script_ids.length +
+                 " اسکریپت در کانفیگ است.", "success");
+      setTimeout(function () { location.reload(); }, 900);
+    });
+  });
+})();
+</script>
+{% endblock %}

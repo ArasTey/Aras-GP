@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Aras-GP">
+  <!--
+    Aras-GP mark.
+
+    Read it as a gateway seen head-on: an outer hexagonal shield (the front
+    domain the traffic hides behind), a second shield inset inside it (the
+    relay), and a beam that enters from the lower right, crosses the barrier
+    and exits upper left. The break in the shield's stroke is where the beam
+    passes through — the whole idea of domain fronting in one glyph.
+
+    The negative space between the beam and the inner shield forms an "A".
+  -->
+  <defs>
+    <linearGradient id="arasShield" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9B81FF"/>
+      <stop offset="0.55" stop-color="#7C5CFF"/>
+      <stop offset="1" stop-color="#2F83F6"/>
+    </linearGradient>
+    <linearGradient id="arasBeam" x1="46" y1="52" x2="18" y2="12" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF8A3D"/>
+      <stop offset="0.6" stop-color="#FFA257"/>
+      <stop offset="1" stop-color="#FFC48A"/>
+    </linearGradient>
+    <linearGradient id="arasCore" x1="24" y1="22" x2="42" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#EFEAFF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#B9A6FF" stop-opacity="0.35"/>
+    </linearGradient>
+    <mask id="arasCut">
+      <rect width="64" height="64" fill="#fff"/>
+      <!-- the corridor the beam carves through both shields -->
+      <path d="M45.5 49.5 L20.5 17.5" stroke="#000" stroke-width="11" stroke-linecap="round"/>
+    </mask>
+  </defs>
+
+  <!-- outer shield -->
+  <g mask="url(#arasCut)">
+    <path d="M32 3.6 55.4 17.1 v27 L32 57.6 8.6 44.1 v-27 Z"
+          fill="none" stroke="url(#arasShield)" stroke-width="4.2" stroke-linejoin="round"/>
+    <!-- inner shield -->
+    <path d="M32 15.4 44.9 22.8 v14.8 L32 45 19.1 37.6 V22.8 Z"
+          fill="url(#arasCore)" fill-opacity="0.16"
+          stroke="url(#arasShield)" stroke-width="2.4" stroke-linejoin="round"/>
+  </g>
+
+  <!-- the beam: enters bottom-right, exits top-left -->
+  <path d="M47.5 52 L17 12.6" stroke="url(#arasBeam)" stroke-width="4.4" stroke-linecap="round"/>
+  <!-- arrowhead at the exit -->
+  <path d="M17 12.6 L26.6 14.2 M17 12.6 L18.9 22"
+        stroke="url(#arasBeam)" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- entry node -->
+  <circle cx="47.5" cy="52" r="3.4" fill="#FF8A3D"/>
+  <circle cx="47.5" cy="52" r="6.4" fill="none" stroke="#FF8A3D" stroke-opacity="0.35" stroke-width="1.6"/>
+</svg>

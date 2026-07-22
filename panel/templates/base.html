@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="color-scheme" content="dark">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}پنل Aras-GP{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='brand/aras-mark.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/aras.css') }}">
+</head>
+<body>
+{% from '_icons.html' import icon %}
+{% set nav_groups = [
+  ('کنترل', [
+    ('dashboard',    'داشبورد',      'gauge'),
+    ('status_page',  'وضعیت',        'pulse'),
+  ]),
+  ('راه‌اندازی', [
+    ('deploy_page',  'دیپلوی',       'rocket'),
+    ('config_page',  'ساخت کانفیگ',  'sliders'),
+  ]),
+  ('مدیریت', [
+    ('users_page',   'کاربران',      'users'),
+    ('settings_page','تنظیمات',      'gear'),
+  ])
+] %}
+
+{% block body %}
+<div class="ar-shell">
+
+  <div class="ar-scrim" hidden></div>
+
+  <aside class="ar-side">
+    <a class="ar-brand" href="{{ url_for('dashboard') }}">
+      <img class="ar-brand__mark" src="{{ url_for('static', filename='brand/aras-mark.svg') }}"
+           alt="" width="44" height="44">
+      <span class="ar-brand__text">
+        <span class="ar-brand__name">Aras-GP</span>
+        <span class="ar-brand__tag">پنل مدیریت رله</span>
+      </span>
+    </a>
+
+    <nav class="ar-nav">
+      {% for group, items in nav_groups %}
+        <div class="ar-nav__label">{{ group }}</div>
+        {% for endpoint, label, ico in items %}
+          <a class="ar-nav__item {% if nav_active == endpoint %}ar-nav__item--on{% endif %}"
+             href="{{ url_for(endpoint) }}">
+            {{ icon(ico, 18) }}<span>{{ label }}</span>
+            {% if endpoint == 'status_page' and relay_running %}
+              <span class="ar-dot ar-dot--live" style="margin-inline-start:auto"></span>
+            {% endif %}
+          </a>
+        {% endfor %}
+      {% endfor %}
+    </nav>
+
+    <div class="ar-side__foot">
+      <div class="ar-relay">
+        <div class="ar-relay__row">
+          <span class="ar-relay__label">موتور رله</span>
+          <span class="ar-row" style="gap:6px">
+            <span class="ar-dot {% if relay_running %}ar-dot--live{% endif %}" id="relay-dot"></span>
+            <span class="ar-relay__state {% if relay_running %}ar-relay__state--on{% else %}ar-relay__state--off{% endif %}"
+                  id="relay-state">{{ 'روشن' if relay_running else 'خاموش' }}</span>
+          </span>
+        </div>
+        <div style="margin-top:var(--ar-s3)">
+          <button class="ar-btn ar-btn--sm ar-btn--block {% if relay_running %}ar-btn--danger{% else %}ar-btn--primary{% endif %}"
+                  id="relay-toggle" data-running="{{ '1' if relay_running else '0' }}">
+            {{ icon('stop' if relay_running else 'play', 14) }}
+            <span>{{ 'توقف رله' if relay_running else 'راه‌اندازی رله' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <form method="post" action="{{ url_for('logout_view') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="ar-btn ar-btn--ghost ar-btn--sm ar-btn--block" type="submit">
+          {{ icon('logout', 14) }}<span>خروج</span>
+        </button>
+      </form>
+    </div>
+  </aside>
+
+  <div class="ar-main">
+    <div class="ar-topbar">
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-sidebar-toggle aria-label="منو">
+        {{ icon('menu', 20) }}
+      </button>
+      <img src="{{ url_for('static', filename='brand/aras-mark.svg') }}" alt="" width="26" height="26">
+      <b class="ar-brand__name">Aras-GP</b>
+      <span class="ar-spacer"></span>
+      <span class="ar-dot {% if relay_running %}ar-dot--live{% endif %}"></span>
+    </div>
+
+    <div class="ar-page">
+      {% block content %}{% endblock %}
+
+      <footer class="ar-foot">
+        <b>سلب مسئولیت</b>
+        <ul>
+          <li>این نرم‌افزار فقط برای اهداف آموزشی، تحقیقاتی و تست ارائه شده است.</li>
+          <li>نرم‌افزار «همان‌طور که هست» (AS IS) ارائه می‌شود، بدون هیچ ضمانتی.</li>
+          <li>توسعه‌دهندگان مسئولیتی در قبال خسارات احتمالی ندارند.</li>
+          <li>رعایت قوانین محلی، ملی و بین‌المللی بر عهده‌ی کاربر است.</li>
+          <li>رعایت شرایط استفاده از سرویس‌های Google و Cloudflare بر عهده‌ی کاربر است.</li>
+        </ul>
+        <div style="margin-top:var(--ar-s3);display:flex;flex-wrap:wrap;gap:var(--ar-s4)">
+          <span>Aras-GP Panel نسخه {{ panel_version }}</span>
+          <span>این پنل هیچ داده‌ای به سرور بیرونی نمی‌فرستد؛ تنها ارتباط خارجی، API کلودفلر هنگام دیپلوی است.</span>
+        </div>
+      </footer>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+<div class="ar-toasts"></div>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <script type="application/json" id="ar-flashes" nonce="{{ csp_nonce() }}">{{ messages|tojson }}</script>
+  {% endif %}
+{% endwith %}
+
+<script src="{{ url_for('static', filename='js/aras.js') }}"></script>
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  var toggle = document.getElementById("relay-toggle");
+  if (!toggle) return;
+  Aras.action(toggle, function () {
+    var running = toggle.dataset.running === "1";
+    return Aras.post(running ? "/api/relay/stop" : "/api/relay/start").then(function (result) {
+      if (Aras.report(result)) {
+        setTimeout(function () { window.location.reload(); }, 600);
+      }
+    });
+  });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
