@@ -35,9 +35,8 @@
   <div class="ar-card__head">
     <h2 class="ar-card__title">{{ icon('check', 18) }} وضعیت راه‌اندازی شما</h2>
   </div>
-  <div class="ar-grid ar-grid--4">
+  <div class="ar-grid ar-grid--3">
     {% for label, done, where in [
-      ('کلید احراز هویت', state.has_auth_key, url_for('config_page')),
       ('Worker کلودفلر', state.has_worker, url_for('deploy_page')),
       ('Apps Script', state.has_script, url_for('deploy_page')),
       ('گواهی CA', state.ca_trusted, url_for('status_page')),
@@ -67,36 +66,31 @@
   </div>
 
   <div class="ar-steps">
-    {{ step(1, 'ساخت کلید احراز هویت',
-      'به <a href="' ~ url_for('deploy_page') ~ '">دیپلوی</a> بروید و روی دکمه‌ی
-       تولید کلید کنار کادر <span class="ar-mono ar-ltr">auth_key</span> بزنید.
-       این کلید رمز مشترک بین رله‌ی شما و Apps Script است — همان‌جا ذخیره می‌شود.') }}
-
-    {{ step(2, 'دیپلوی Cloudflare Worker',
+    {{ step(1, 'دیپلوی Cloudflare Worker',
       'در همان صفحه، دکمه‌ی «ساخت توکن با دسترسی آماده» صفحه‌ی کلودفلر را با
        دسترسی‌های لازم از پیش انتخاب‌شده باز می‌کند؛ فقط Continue و Create Token
        را بزنید. توکن <b>فقط یک بار</b> نمایش داده می‌شود — همان لحظه کپی کنید و
        در پنل بگذارید، بعد «بررسی توکن» و «دیپلوی Worker».') }}
 
-    {{ step(3, 'ساخت Apps Script',
+    {{ step(2, 'ساخت Apps Script',
       'دکمه‌ی «تولید Code.gs» کد را با کلید و آدرس Worker شما آماده می‌کند.
        آن را در <span class="ar-mono ar-ltr">script.google.com</span> جای‌گذاری
        کنید و Deploy → New deployment → <b>Web app</b> بزنید، با
        Execute as = <b>Me</b> و Who has access = <b>Anyone</b>.
        آدرس نهایی را در کادر پایین همان صفحه وارد کنید.') }}
 
-    {{ step(4, 'نصب گواهی CA',
+    {{ step(3, 'نصب گواهی CA',
       'در صفحه‌ی <a href="' ~ url_for('status_page') ~ '">وضعیت</a> دکمه‌ی
        «نصب گواهی» را بزنید. روی macOS معمولاً یک دستور <span class="ar-mono ar-ltr">sudo</span>
        هم لازم است که همان‌جا نمایش داده می‌شود. بعد مرورگر را <b>کامل</b>
        ببندید و باز کنید، وگرنه گواهی جدید را نمی‌بیند.') }}
 
-    {{ step(5, 'روشن‌کردن رله',
+    {{ step(4, 'روشن‌کردن رله',
       'از نوار کناری دکمه‌ی «راه‌اندازی رله». بعد در
        <a href="' ~ url_for('dashboard') ~ '">داشبورد</a> روی «تست اتصال رله»
        بزنید — اگر سبز شد یعنی کل زنجیره کار می‌کند.') }}
 
-    {{ step(6, 'تنظیم مرورگر یا سیستم',
+    {{ step(5, 'تنظیم مرورگر یا سیستم',
       'پروکسی را روی <span class="ar-mono ar-ltr">' ~ state.listen_host ~ ':' ~ state.listen_port ~ '</span>
        (HTTP) یا <span class="ar-mono ar-ltr">' ~ state.listen_host ~ ':' ~ state.socks5_port ~ '</span>
        (SOCKS5) بگذارید. برای تست: به <span class="ar-mono ar-ltr">https://ip.me</span>

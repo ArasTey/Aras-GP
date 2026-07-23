@@ -221,14 +221,28 @@ def resolve_account_id(token: str, account_id: str = "") -> str:
     if re.fullmatch(r"[0-9a-fA-F]{32}", account_id):
         return account_id
     if account_id:
-        raise CloudflareError("Account ID باید یک رشته ۳۲ کاراکتری هگز باشد.")
+        raise CloudflareError("Account ID باید یک رشته ۳۲ کاراکتری هگز باشد.",
+                              errors=[{"manual": True}])
 
-    accounts = list_accounts(token)
+    # Listing accounts needs "Account Settings: Read", which a token made only
+    # for Workers does not carry — and such a token deploys perfectly well.
+    # Failing here would strand exactly the people whose setup already worked,
+    # so a lookup we cannot perform falls back to asking, never to a dead end.
+    manual_hint = (
+        "Account ID را خودکار پیدا نکردم، چون این توکن دسترسی "
+        "«Account Settings: Read» ندارد. یا Account ID را در همین کادر وارد "
+        "کنید (از داشبورد کلودفلر، بخش Workers، ستون سمت راست)، یا توکن را با "
+        "آن دسترسی دوباره بسازید."
+    )
+    try:
+        accounts = list_accounts(token)
+    except CloudflareError as exc:
+        log.info("Account lookup refused (%s) — asking for the ID instead",
+                 exc.message)
+        raise CloudflareError(manual_hint, errors=[{"manual": True}]) from exc
+
     if not accounts:
-        raise CloudflareError(
-            "این توکن به هیچ حسابی دسترسی ندارد. موقع ساخت توکن، دسترسی "
-            "«Account Settings: Read» را هم بدهید."
-        )
+        raise CloudflareError(manual_hint, errors=[{"manual": True}])
     if len(accounts) == 1:
         log.info("Account ID resolved automatically: %s", accounts[0]["name"])
         return accounts[0]["id"]
@@ -236,7 +250,7 @@ def resolve_account_id(token: str, account_id: str = "") -> str:
     names = "، ".join(a["name"] for a in accounts[:5])
     raise CloudflareError(
         f"این توکن به {len(accounts)} حساب دسترسی دارد ({names}). "
-        "یکی را از فهرست انتخاب کنید.",
+        "یکی را انتخاب کنید.",
         errors=[{"accounts": accounts}],
     )
 
@@ -244,7 +258,6 @@ def resolve_account_id(token: str, account_id: str = "") -> str:
 def deploy(token: str, account_id: str, script_name: str,
            vless_uuids: list[str] | None = None) -> dict:
     """Full deploy. Returns the public worker URL and the steps that ran."""
-    account_id = resolve_account_id(token, account_id)
     script_name = validate_script_name(script_name)
 
     steps: list[dict] = []
@@ -252,8 +265,15 @@ def deploy(token: str, account_id: str, script_name: str,
     def record(label: str, ok: bool, detail: str = ""):
         steps.append({"label": label, "ok": ok, "detail": detail})
 
+    # The token is checked before anything is inferred from it. Resolving the
+    # account first meant a simply invalid token came back as "your token is
+    # missing Account Settings: Read", which sends the reader off to fix a
+    # permission on a token that was never going to work.
     token_info = verify_token(token)
     record("بررسی توکن", True, token_info.get("status", ""))
+
+    account_id = resolve_account_id(token, account_id)
+    record("یافتن حساب", True, account_id[:8] + "…")
 
     subdomain = get_workers_subdomain(token, account_id)
     if not subdomain:
@@ -278,5 +298,8 @@ def deploy(token: str, account_id: str, script_name: str,
         "worker_url": worker_url,
         "subdomain": subdomain,
         "script_name": script_name,
+        # The caller stores this: it was persisting whatever the form sent,
+        # which is now empty, so a successful deploy used to forget the account.
+        "account_id": account_id,
         "steps": steps,
     }

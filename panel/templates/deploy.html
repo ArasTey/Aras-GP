@@ -76,7 +76,11 @@
           از شما پرسیده می‌شود.
         </div>
       </div>
-      <input type="hidden" id="cf-account" value="{{ cf.account_id }}">
+      <div class="ar-input-group" id="cf-account-manual" style="margin-top:var(--ar-s3)"
+           {% if not cf.account_id %}hidden{% endif %}>
+        <input class="ar-input ar-mono" type="text" id="cf-account" dir="ltr"
+               value="{{ cf.account_id }}" placeholder="Account ID — ۳۲ کاراکتر هگز">
+      </div>
     </div>
 
     <div class="ar-field">
@@ -300,7 +304,19 @@
         (data.details || []).forEach(function (d) {
           if (d && d.accounts) choices = d.accounts;
         });
+        var manual = false;
+        (data.details || []).forEach(function (d) { if (d && d.manual) manual = true; });
         if (choices) offerAccounts(choices);
+        if (manual) {
+          // Auto-lookup is not possible with this token; give the field back
+          // instead of leaving the operator with no way forward.
+          document.getElementById("cf-account-manual").hidden = false;
+          document.getElementById("cf-accounts-hint").innerHTML =
+            "<b>Account ID را دستی وارد کنید</b> — توکن شما اجازه‌ی خواندن " +
+            "فهرست حساب‌ها را ندارد. آن را از داشبورد کلودفلر، بخش Workers، " +
+            "ستون سمت راست بردارید.";
+          document.getElementById("cf-account").focus();
+        }
         Aras.toast(data.error, "error", 9000);
         result.innerHTML = '<div class="ar-note ar-note--bad">' +
           '<div>' + Aras.escape(data.error) + "</div></div>";
