@@ -20,7 +20,9 @@ _ENGINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine")
 if _ENGINE_DIR not in sys.path:
     sys.path.insert(0, _ENGINE_DIR)
 
-from cert_installer import install_ca, uninstall_ca, is_ca_trusted
+from cert_installer import (
+    install_ca, is_ca_trusted, remove_stale_cas, stale_macos_cas, uninstall_ca,
+)
 from constants import __version__
 from lan_utils import log_lan_access
 from google_ip_scanner import scan_sync
@@ -94,6 +96,13 @@ def parse_args():
         help="Remove the MITM CA certificate from trusted roots and exit.",
     )
     parser.add_argument(
+        "--stale-only",
+        action="store_true",
+        help="With --uninstall-cert: remove only OLD CAs left by earlier "
+             "installs (same name, different key), keeping the current one. "
+             "Those are what make a browser report a certificate error.",
+    )
+    parser.add_argument(
         "--no-cert-check",
         action="store_true",
         help="Skip the certificate installation check on startup.",
@@ -121,6 +130,11 @@ def main():
                 MITMCertManager()  # side-effect: creates ca/ca.crt + ca/ca.key
             ok = install_ca(CA_CERT_FILE)
             sys.exit(0 if ok else 1)
+
+        if args.stale_only:
+            _log.info("Removing stale CA certificates (keeping the current one)…")
+            removed = remove_stale_cas(CA_CERT_FILE)
+            sys.exit(0 if removed else 1)
 
         _log.info("Removing CA certificate…")
         ok = uninstall_ca(CA_CERT_FILE)
@@ -263,15 +277,25 @@ def main():
         else:
             log.info("MITM CA is already trusted.")
 
+        # An older CA of ours left in the trust store shares this one's name
+        # but not its key. A browser that picks it to verify a leaf we signed
+        # reports a certificate error on every intercepted site, which looks
+        # like the relay is broken. Say so plainly rather than let the operator
+        # hunt for it.
+        stale = stale_macos_cas(CA_CERT_FILE)
+        if stale:
+            log.warning(
+                "%d older Aras-GP CA(s) are still trusted by this machine and "
+                "no longer match the key in use. If the browser reports a "
+                "certificate error, remove them: "
+                "python main.py --uninstall-cert --stale-only", len(stale),
+            )
+
     # ── LAN sharing configuration ────────────────────────────────────────
+    # ProxyServer owns the "lan_sharing means bind everything" rule now, so
+    # both entry points behave the same; here we only decide what to print.
     lan_sharing = config.get("lan_sharing", False)
     listen_host = config.get("listen_host", "127.0.0.1")
-    if lan_sharing:
-        # If LAN sharing is enabled and host is still localhost, change to all interfaces
-        if listen_host == "127.0.0.1":
-            config["listen_host"] = "0.0.0.0"
-            listen_host = "0.0.0.0"
-            log.info("LAN sharing enabled — listening on all interfaces")
 
     # If either explicit LAN sharing is enabled or we bind to all interfaces,
     # print concrete IPv4 addresses users can use on other devices.

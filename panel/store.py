@@ -39,12 +39,6 @@ DEFAULT_STATE: dict = {
         "token": "",
         "workers_subdomain": "",
         "worker_url": "",
-        "upstream_forwarder_url": "",
-    },
-    "forwarder": {             # fronted exit: Worker → your VPS → destination
-        "url": "",
-        "auth_key": "",
-        "enabled": False,
     },
     "gas": {
         "deployment_ids": [],

@@ -20,10 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import time
-
-import requests
 
 from flask import (
     Flask, Response, flash, jsonify, redirect, render_template, request,
@@ -34,8 +31,9 @@ from . import (
     __version__, cloudflare, configgen, failover, gasgen, licensing, paths,
     security, store, users,
 )
-from .relay_manager import macos_trust_command, manager, refresh_ca_status
-from upstream_proxy import DEFAULT_AI_HOSTS, UpstreamError, UpstreamProxy  # engine/
+from .relay_manager import (
+    macos_trust_command, manager, refresh_ca_status, stale_ca_command,
+)
 
 log = logging.getLogger("panel")
 
@@ -72,26 +70,6 @@ def _int_arg(value, default: int, low: int, high: int) -> int:
         return default
 
 
-_ENV_LINE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\s*=")
-
-
-def _invalid_env_line(content: str) -> str | None:
-    """Return the first line that is not ``KEY=VALUE``, a comment, or blank.
-
-    The forwarder ``.env`` is written outside the panel's data directory and is
-    consumed by docker-compose, so a malformed paste (or a stray API call
-    sending a non-string body) would leave the operator with a file that
-    silently breaks their deployment.
-    """
-    for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if not _ENV_LINE_RE.match(stripped):
-            return stripped
-    return None
-
-
 def _safe_next(target: str | None, fallback: str) -> str:
     """Only allow same-origin relative redirects.
 
@@ -104,41 +82,6 @@ def _safe_next(target: str | None, fallback: str) -> str:
     if target.startswith("//") or target.startswith("/\\"):
         return fallback
     return target
-
-
-def _probe_upstream(proxy) -> dict:
-    """Ask api.ipify.org, through the exit, what IP the world sees.
-
-    Runs in a throwaway event loop so it never touches the relay's loop, and
-    is only ever called from the explicit "test" button.
-    """
-    import asyncio
-
-    async def run():
-        started = time.monotonic()
-        reader, writer = await proxy.connect("api.ipify.org", 80)
-        try:
-            writer.write(b"GET / HTTP/1.1\r\nHost: api.ipify.org\r\n"
-                         b"User-Agent: Aras-GP\r\nConnection: close\r\n\r\n")
-            await writer.drain()
-            raw = await asyncio.wait_for(reader.read(4096), timeout=15)
-        finally:
-            writer.close()
-        elapsed = (time.monotonic() - started) * 1000
-        body = raw.split(b"\r\n\r\n", 1)[-1].decode("utf-8", "replace").strip()
-        return {"ok": True, "ip": body[:64], "ms": round(elapsed, 1)}
-
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(asyncio.wait_for(run(), timeout=25))
-    except UpstreamError as exc:
-        return {"ok": False, "error": str(exc)}
-    except asyncio.TimeoutError:
-        return {"ok": False, "error": "خروجی در زمان مقرر پاسخ نداد."}
-    except Exception as exc:
-        return {"ok": False, "error": f"اتصال ناموفق بود: {exc}"}
-    finally:
-        loop.close()
 
 
 def _ok(**payload):
@@ -301,20 +244,11 @@ def create_app() -> Flask:
     def settings_page():
         state = store.load()
         config = store.load_config() or {}
-        forwarder_env = ""
-        if os.path.exists(paths.FORWARDER_ENV):
-            with open(paths.FORWARDER_ENV, encoding="utf-8") as handle:
-                forwarder_env = handle.read()
         return render_template(
             "settings.html",
             cfg=config,
             settings=state["settings"],
             cf=state["cloudflare"],
-            forwarder_env=forwarder_env,
-            upstream=(config.get("upstream_proxy") or {}),
-            forwarder=state["forwarder"],
-            forwarder_hosts=(config.get("forwarder_hosts") or []),
-            default_ai_hosts=list(DEFAULT_AI_HOSTS),
             license=licensing.check(),
         )
 
@@ -348,7 +282,8 @@ def create_app() -> Flask:
     @security.login_required
     def status_page():
         return render_template("status.html", status=manager.status(),
-                               ca_command=macos_trust_command())
+                               ca_command=macos_trust_command(),
+                               stale_command=stale_ca_command())
 
     # ── relay lifecycle ───────────────────────────────────────────────
 
@@ -570,156 +505,6 @@ def create_app() -> Flask:
             return _fail("رله پیدا نشد.", 404)
         return _ok(relays=store.list_relays(), message="رله حذف شد.")
 
-    # ── fronted forwarder (AI over Google) ────────────────────────────
-
-    @app.post("/api/forwarder/save")
-    @security.login_required
-    def api_forwarder_save():
-        """Route chosen hosts through the Worker → your VPS, still fronted.
-
-        Writes ``forwarder_hosts`` into config.json (the engine tags those
-        requests with ``f:1`` so the Worker forwards them) and keeps the URL
-        and key for the next Worker deploy, which must carry both as bindings.
-        """
-        body = _json_body()
-        config = store.load_config()
-        if config is None:
-            return _fail("ابتدا کانفیگ رله را بسازید.")
-
-        enabled = str(body.get("enabled", "")).lower() in ("1", "true", "on")
-        url = (body.get("url") or "").strip().rstrip("/")
-        key = (body.get("auth_key") or "").strip()
-        hosts = configgen.as_list(body.get("hosts")) or list(DEFAULT_AI_HOSTS)
-
-        if enabled:
-            if not url.startswith("https://"):
-                return _fail(
-                    "آدرس فورواردر باید با https:// شروع شود — "
-                    "Worker به آدرس بدون TLS فوروارد نمی‌کند."
-                )
-            if len(key) < 32:
-                return _fail("کلید فورواردر باید حداقل ۳۲ کاراکتر باشد.")
-
-        config["forwarder_hosts"] = hosts if enabled else []
-        store.save_config(config)
-        store.update(forwarder={"url": url, "auth_key": key, "enabled": enabled})
-
-        message = "ذخیره شد."
-        if enabled:
-            message += (" برای اعمال، Worker را دوباره دیپلوی کنید تا "
-                        "آدرس و کلید فورواردر روی آن bind شود.")
-        if manager.running:
-            ok, detail = manager.restart(store.load_config())
-            message += f" رله بازراه‌اندازی {'شد' if ok else 'نشد'}."
-        return _ok(message=message, hosts=hosts)
-
-    @app.post("/api/forwarder/test")
-    @security.login_required
-    @security.rate_limit("fwd_test", limit=10, window=60)
-    def api_forwarder_test():
-        """One real request to the forwarder, only when the button is pressed."""
-        body = _json_body()
-        saved = store.load()["forwarder"]
-        url = (body.get("url") or saved.get("url") or "").strip().rstrip("/")
-        key = (body.get("auth_key") or saved.get("auth_key") or "").strip()
-        if not url:
-            return _fail("آدرس فورواردر وارد نشده است.")
-        if not url.startswith("https://"):
-            return _fail("آدرس فورواردر باید https باشد.")
-
-        payload = json.dumps({"u": "https://api.ipify.org", "m": "GET",
-                              "h": {"User-Agent": "Aras-GP"}, "r": True})
-        try:
-            response = requests.post(
-                url, data=payload, timeout=25,
-                headers={"content-type": "application/json",
-                         "x-upstream-auth": key},
-            )
-        except requests.RequestException as exc:
-            return _fail(f"اتصال به فورواردر برقرار نشد: {type(exc).__name__}", 502)
-
-        if response.status_code == 403:
-            return _fail("کلید فورواردر اشتباه است.", 502)
-        if response.status_code != 200:
-            return _fail(f"فورواردر کد {response.status_code} برگرداند.", 502)
-        try:
-            data = response.json()
-        except ValueError:
-            return _fail("پاسخ فورواردر JSON نبود.", 502)
-        if "e" in data:
-            return _fail(f"فورواردر خطا داد: {data['e']}", 502)
-
-        ip = ""
-        if data.get("b"):
-            import base64 as _b64
-            try:
-                ip = _b64.b64decode(data["b"]).decode("utf-8", "replace").strip()
-            except Exception:
-                ip = ""
-        return _ok(ip=ip[:64], status=data.get("s"))
-
-    # ── upstream exit (AI hosts / static IP) ──────────────────────────
-
-    @app.post("/api/upstream/save")
-    @security.login_required
-    def api_upstream_save():
-        body = _json_body()
-        config = store.load_config()
-        if config is None:
-            return _fail("ابتدا کانفیگ رله را بسازید.")
-
-        url = (body.get("url") or "").strip()
-        enabled = str(body.get("enabled", "")).lower() in ("1", "true", "on")
-        route_all = str(body.get("route_all", "")).lower() in ("1", "true", "on")
-        hosts = configgen.as_list(body.get("hosts"))
-
-        if enabled:
-            if not url:
-                return _fail("آدرس خروجی را وارد کنید.")
-            try:
-                UpstreamProxy(url)
-            except ValueError as exc:
-                return _fail(str(exc))
-
-        config["upstream_proxy"] = {
-            "enabled": enabled,
-            "url": url,
-            "route_all": route_all,
-            "hosts": hosts or list(DEFAULT_AI_HOSTS),
-        }
-        store.save_config(config)
-        message = "ذخیره شد."
-        if manager.running:
-            ok, detail = manager.restart(store.load_config())
-            message += f" رله بازراه‌اندازی {'شد' if ok else 'نشد'} — {detail}"
-        return _ok(message=message,
-                   hosts=config["upstream_proxy"]["hosts"])
-
-    @app.post("/api/upstream/test")
-    @security.login_required
-    @security.rate_limit("upstream_test", limit=10, window=60)
-    def api_upstream_test():
-        """Open one real connection through the exit and report the IP it has.
-
-        A single request, only when the operator presses the button — the
-        panel never probes this endpoint on a timer.
-        """
-        url = (_json_body().get("url") or "").strip()
-        if not url:
-            config = store.load_config() or {}
-            url = (config.get("upstream_proxy") or {}).get("url", "")
-        if not url:
-            return _fail("آدرس خروجی وارد نشده است.")
-        try:
-            proxy = UpstreamProxy(url)
-        except ValueError as exc:
-            return _fail(str(exc))
-
-        result = _probe_upstream(proxy)
-        if result.get("ok"):
-            return _ok(**result)
-        return _fail(result.get("error", "اتصال ناموفق بود."), 502)
-
     # ── backup / restore / reset ──────────────────────────────────────
 
     @app.get("/api/backup/export")
@@ -806,15 +591,11 @@ def create_app() -> Flask:
         body = _json_body()
         account_id = (body.get("account_id") or "").strip()
         script_name = (body.get("script_name") or "aras-relay").strip()
-        upstream = (body.get("upstream_forwarder_url") or "").strip()
         remember = str(body.get("remember_token", "")).lower() in ("1", "true", "on")
 
         try:
             token = _cf_token(body)
-            result = cloudflare.deploy(
-                token, account_id, script_name, upstream,
-                store.load()["forwarder"].get("auth_key", ""),
-            )
+            result = cloudflare.deploy(token, account_id, script_name)
         except ValueError as exc:
             return _fail(str(exc))
         except cloudflare.CloudflareError as exc:
@@ -830,7 +611,6 @@ def create_app() -> Flask:
             "token": token if remember else "",
             "workers_subdomain": result["subdomain"],
             "worker_url": result["worker_url"],
-            "upstream_forwarder_url": upstream,
         })
         store.add_history({"kind": "cloudflare", "ok": True,
                            "script_name": result["script_name"],
@@ -1005,33 +785,6 @@ def create_app() -> Flask:
                 flash("رمز پنل تغییر کرد.", "success")
         flash("تنظیمات ذخیره شد.", "success")
         return redirect(url_for("settings_page"))
-
-    @app.post("/api/settings/forwarder-env")
-    @security.login_required
-    def api_forwarder_env():
-        body = _json_body()
-        # A request with no "content" key must not silently truncate the file:
-        # this writes outside the panel's own data directory, so an empty or
-        # malformed body would destroy the operator's forwarder settings.
-        if "content" not in body:
-            return _fail("محتوایی برای ذخیره ارسال نشده است.")
-        content = str(body.get("content") or "")
-        if len(content) > 16 * 1024:
-            return _fail("محتوای فایل .env بیش از حد بزرگ است.")
-        if not content.strip():
-            return _fail(
-                "محتوای خالی ذخیره نمی‌شود. برای پاک‌کردن تنظیمات فورواردر، "
-                "فایل .env را مستقیماً حذف کنید."
-            )
-        bad = _invalid_env_line(content)
-        if bad is not None:
-            return _fail(f"سطر نامعتبر در فایل .env: «{bad[:60]}» — "
-                         f"هر سطر باید به شکل KEY=VALUE باشد.")
-        os.makedirs(os.path.dirname(paths.FORWARDER_ENV), exist_ok=True)
-        fd = os.open(paths.FORWARDER_ENV, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        return _ok(message="فایل .env فورواردر ذخیره شد.")
 
     # ── certificate authority ─────────────────────────────────────────
 

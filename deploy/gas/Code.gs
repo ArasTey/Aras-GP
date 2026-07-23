@@ -114,7 +114,6 @@ function _buildWorkerPayload(req) {
     r: req.r !== false
   };
 
-  if (typeof req.f === "number") out.f = req.f;
   return out;
 }
 

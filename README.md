@@ -28,7 +28,7 @@
 |---|---|---|
 | [🎯 این چیست](#what) | [🖼️ نمای پنل](#gallery) | [⚙️ نصب](#install) |
 | [🚀 راه‌اندازی](#setup) | [🔁 اجرای دائمی](#daemon) | [👥 کاربران](#users) |
-| [🤖 ChatGPT و IP ثابت](#ai) | [🔀 سوییچ خودکار](#failover) | [💾 پشتیبان‌گیری](#backup) |
+| [🔀 سوییچ خودکار](#failover) | [💾 پشتیبان‌گیری](#backup) |
 | [🧩 مرجع کانفیگ](#config-ref) | [🔌 مرجع API](#api-ref) | [📜 مرجع اسکریپت‌ها](#scripts-ref) |
 | [🩺 عیب‌یابی](#troubleshooting) | [🔐 امنیت](#security) | [🏗️ معماری](#architecture) |
 | [🧪 توسعه و تست](#dev) | [📄 لایسنس](#license) | [⚠️ سلب مسئولیت](#disclaimer) |
@@ -48,7 +48,6 @@ flowchart LR
     B -->|"TLS با SNI=www.google.com"| C["📄 Google Apps Script"]
     C -->|"HTTPS"| D["☁️ Cloudflare Worker"]
     D --> E["🌐 مقصد"]
-    B -.->|"فقط میزبان‌های AI"| F["🖧 VPS شما"]
     F -.-> E
     style A fill:#7C5CFF,stroke:#9B81FF,color:#fff
     style B fill:#2F83F6,stroke:#57A5FF,color:#fff
@@ -69,7 +68,7 @@ flowchart LR
 | 🚀 **دیپلوی** | آپلود خودکار Worker + تولید `Code.gs` + ذخیره‌ی رله برای استفاده‌ی مجدد |
 | 🎛️ **ساخت کانفیگ** | فرم کامل همه‌ی کلیدها + تولید کلید قوی + پروفایل‌ها |
 | 👥 **کاربران** | احراز هویت per-connection، سهمیه‌ی حجمی، تاریخ انقضا، قطع خودکار |
-| ⚙️ **تنظیمات** | خروجی AI و IP ثابت، پشتیبان‌گیری، سوییچ خودکار، رمز پنل |
+| ⚙️ **تنظیمات** | پشتیبان‌گیری، سوییچ خودکار، رمز پنل |
 | 📖 **راهنما** | آموزش گام‌به‌گام داخل پنل با چک‌لیست پیشرفت واقعی شما |
 
 ---
@@ -114,7 +113,7 @@ flowchart LR
 </details>
 
 <details>
-<summary><b>⚙️ تنظیمات</b> — خروجی AI، پشتیبان‌گیری، سوییچ خودکار</summary>
+<summary><b>⚙️ تنظیمات</b> — پشتیبان‌گیری، سوییچ خودکار</summary>
 <br><img src="docs/screenshots/settings.png" alt="تنظیمات">
 </details>
 
@@ -146,8 +145,6 @@ flowchart LR
 | Python 3.10+ | همه‌چیز | ✅ |
 | حساب Google | استقرار Apps Script | ✅ |
 | توکن API کلودفلر | دیپلوی خودکار Worker (پنل لینک ساختش را می‌دهد) | ✅ |
-| یک VPS ارزان | فقط اگر ChatGPT یا IP ثابت می‌خواهید | ⬜ |
-| یک دامنه | فقط برای روش امنِ خروجی AI (جایگزین: Cloudflare Tunnel) | ⬜ |
 
 ### 🐧 لینوکس
 
@@ -487,93 +484,6 @@ sudo systemctl enable --now aras-panel
 
 ---
 
-<a id="ai"></a>
-
-## 🤖 ChatGPT و IP ثابت
-
-ترافیکی که از Cloudflare Workers خارج می‌شود با IP رنج کلودفلر به مقصد می‌رسد و
-OpenAI آن رنج را مسدود کرده:
-
-```
-Unable to load site
-Please try again later. If you are using a VPN, try turning it off.
-[IP:2a06:98c0:3600::103 | Ray ID:a1f3b1fdce195358]
-```
-
-این **داخل رله قابل حل نیست**. راهش یک خروجی دیگر است: یک VPS که شما کنترلش
-می‌کنید. پنل دو روش می‌دهد.
-
-### 🛡️ روش امن — از مسیر گوگل (پیشنهادی)
-
-```mermaid
-flowchart LR
-    A["🖥️ مرورگر"] --> B["⚙️ رله"]
-    B -->|"SNI=google.com"| C["📄 Apps Script"]
-    C --> D["☁️ Worker"]
-    D -->|"HTTPS"| E["🖧 VPS شما"]
-    E --> F["🤖 OpenAI"]
-    style A fill:#7C5CFF,color:#fff
-    style B fill:#2F83F6,color:#fff
-    style C fill:#4285F4,color:#fff
-    style D fill:#F38020,color:#fff
-    style E fill:#22c58c,color:#fff
-    style F fill:#10a37f,color:#fff
-```
-
-ISP همچنان **فقط گوگل** می‌بیند و مقصد IP ثابت VPS شما را.
-
-```bash
-# روی VPS — با دامنه‌ی خودتان (Caddy گواهی Let's Encrypt را خودکار می‌گیرد)
-curl -fsSL https://raw.githubusercontent.com/ArasTey/Aras-GP/main/scripts/install-forwarder.sh -o f.sh
-sudo bash f.sh --domain fwd.example.com
-
-# یا بدون دامنه — با Cloudflare Tunnel
-sudo bash f.sh --tunnel
-```
-
-آخر کار **آدرس** و **کلید** را می‌دهد → تنظیمات پنل → «AI از مسیر گوگل» →
-تست → ذخیره → **بعد یک بار Worker را دوباره دیپلوی کنید** (آدرس و کلید باید
-روی خود Worker بایند شوند).
-
-### ⚡ روش سریع — مستقیم
-
-```mermaid
-flowchart LR
-    A["🖥️ مرورگر"] --> B["⚙️ رله"]
-    B -->|"SOCKS5 مستقیم"| C["🖧 VPS شما"]
-    C --> D["🤖 OpenAI"]
-    style A fill:#7C5CFF,color:#fff
-    style B fill:#2F83F6,color:#fff
-    style C fill:#22c58c,color:#fff
-    style D fill:#10a37f,color:#fff
-```
-
-دو هاپ کمتر و سریع‌تر، ولی اتصال به VPS برای ISP قابل دیدن است و
-Domain Fronting ندارد.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ArasTey/Aras-GP/main/scripts/install-exit-node.sh | sudo bash
-```
-
-### مقایسه
-
-| | 🛡️ از مسیر گوگل | ⚡ مستقیم |
-|:--|:--:|:--:|
-| Domain Fronting حفظ می‌شود | ✅ | ❌ |
-| ISP چه می‌بیند | فقط گوگل | اتصال به IP خارجی |
-| IP ثابت برای مقصد | ✅ | ✅ |
-| سرعت | متوسط | سریع‌تر |
-| نیاز به دامنه یا Tunnel | ✅ | ❌ |
-
-> 🔄 هر دو روش **فقط** دامنه‌های فهرست‌شده را از VPS رد می‌کنند؛ بقیه از رله.
-> اگر VPS خاموش شود، آن میزبان‌ها خودکار به رله برمی‌گردند — قطعی نمی‌شود.
-
-**دامنه‌های پیش‌فرض:** `openai.com` · `chatgpt.com` · `oaistatic.com` ·
-`oaiusercontent.com` · `claude.ai` · `anthropic.com` · `gemini.google.com` ·
-`perplexity.ai` · `x.ai` · `grok.com`
-
----
-
 <a id="failover"></a>
 
 ## 🔀 سوییچ خودکار بین رله‌ها
@@ -684,7 +594,6 @@ curl -b cookies.txt "http://127.0.0.1:8600/api/backup/export?secrets=0" -o backu
 |:--|:--|:--|
 | `block_hosts` | list | با ۴۰۳ رد می‌شوند |
 | `bypass_hosts` | list | مستقیم، بدون MITM و بدون رله |
-| `forwarder_hosts` | list | از مسیر Worker → فورواردر VPS |
 | `direct_google_exclude` | list | سرویس‌های گوگل که باید از رله بروند |
 | `direct_google_allow` | list | سرویس‌های گوگل که مستقیم می‌روند |
 | `youtube_via_relay` | bool | یوتیوب از رله (دور زدن SafeSearch اجباری) |
@@ -699,12 +608,6 @@ curl -b cookies.txt "http://127.0.0.1:8600/api/backup/export?secrets=0" -o backu
   "enabled": false,
   "realm": "Aras-GP",
   "users": []
-},
-"upstream_proxy": {                   // خروجی مستقیم SOCKS5
-  "enabled": false,
-  "url": "socks5://user:pass@1.2.3.4:1080",
-  "route_all": false,                 // true = کل ترافیک، نه فقط لیست
-  "hosts": ["openai.com", "chatgpt.com"]
 }
 ```
 </details>
@@ -790,13 +693,6 @@ curl -b cookies.txt "http://127.0.0.1:8600/api/backup/export?secrets=0" -o backu
 | `POST` | `/api/users/reset-usage` | صفر کردن مصرف |
 | `POST` | `/api/users/disconnect` | قطع اتصال‌های باز |
 
-### خروجی AI
-
-| متد | مسیر | کار |
-|:--|:--|:--|
-| `POST` | `/api/forwarder/save` · `test` | روش امن (از مسیر گوگل) |
-| `POST` | `/api/upstream/save` · `test` | روش مستقیم (SOCKS5) |
-
 ### پشتیبان و گواهی
 
 | متد | مسیر | کار |
@@ -851,63 +747,6 @@ curl -b c.txt http://127.0.0.1:8600/api/stats | python3 -m json.tool
 
 از `pythonw.exe` استفاده می‌کند تا پنجره‌ی کنسول باز نشود.
 
-### `scripts/install-forwarder.sh` — خروجی امن روی VPS
-
-```bash
-sudo bash install-forwarder.sh [گزینه‌ها]
-```
-
-| گزینه | پیش‌فرض | کار |
-|:--|:--|:--|
-| `--domain X` | — | TLS با Caddy + Let's Encrypt |
-| `--tunnel` | — | TLS با Cloudflare Tunnel (بدون دامنه) |
-| `--port N` | `8787` | پورت داخلی فورواردر |
-| `--auth-key X` | تصادفی ۴۸ کاراکتری | کلید مشترک با Worker |
-| `--uninstall` | — | حذف کامل |
-
-نصب می‌کند: یک فورواردر پایتون (فقط کتابخانه‌ی استاندارد) + سرویس systemd با
-sandbox (`DynamicUser`, `ProtectSystem=strict`, `MemoryMax=256M`).
-
-### `scripts/install-exit-node.sh` — خروجی مستقیم روی VPS
-
-```bash
-sudo bash install-exit-node.sh [گزینه‌ها]
-```
-
-| گزینه | پیش‌فرض | کار |
-|:--|:--|:--|
-| `--port N` | `1080` | پورت SOCKS5 |
-| `--user X` | `aras` | نام کاربری |
-| `--password X` | تصادفی ۲۴ کاراکتری | رمز |
-| `--bind X` | `0.0.0.0` | آدرس شنود |
-| `--uninstall` | — | حذف کامل |
-
-> 🔒 دسترسی به شبکه‌ی داخلی (RFC1918 و loopback) به‌صورت پیش‌فرض **بلاک** است تا
-> VPS شما به‌خاطر port scan تعلیق نشود. برای شبکه‌ی خانگی:
-> `ARAS_ALLOW_PRIVATE=1`.
-
-### `main.py` — موتور رله بدون پنل
-
-```bash
-python main.py                      # اجرا با config.json
-python main.py -c other.json        # کانفیگ دیگر
-python main.py -p 9090              # تغییر پورت
-python main.py --scan               # یافتن سریع‌ترین IP گوگل
-python main.py --install-cert       # نصب گواهی CA
-python main.py --uninstall-cert     # حذف گواهی
-python main.py --no-cert-check      # رد کردن بررسی گواهی
-python main.py --log-level DEBUG
-```
-
-### `panel/licensing.py` — قفل لایسنس آفلاین
-
-```bash
-python -m panel.licensing keygen --out vendor-key.pem
-python -m panel.licensing sign --key vendor-key.pem --licensee "نام" --days 365
-python -m panel.licensing verify --file panel/data/license.key
-```
-
-بررسی کاملاً محلی است — یک امضای Ed25519، **بدون هیچ تماس شبکه‌ای**.
 
 ---
 
@@ -918,9 +757,11 @@ python -m panel.licensing verify --file panel/data/license.key
 | نشانه | علت معمول | راه حل |
 |:--|:--|:--|
 | `ERR_CERT_AUTHORITY_INVALID` | گواهی در System keychain نیست یا مرورگر restart نشده | وضعیت → نصب گواهی + دستور `sudo`، بعد `⌘Q` روی مرورگر |
+| خطای گواهی با اینکه پنل می‌گوید «نصب شده» | **CA قدیمی**: پوشه‌ی `ca/` دوباره ساخته شده (کلون تازه یا ریست) ولی CAهای قبلی با همان نام `Aras-GP` هنوز در کیچین مانده‌اند؛ مرورگر ممکن است یکی از آن‌ها را برای بررسی امضا انتخاب کند | `python main.py --uninstall-cert --stale-only` بعد `python main.py --install-cert` و `⌘Q` روی مرورگر. کارت «وضعیت» حالا این CAها را با اثر انگشتشان فهرست می‌کند |
+| رله بعد از مدتی از کار می‌افتد | معمولاً سهمیه‌ی روزانه‌ی Apps Script (هر درخواست یک UrlFetch است) | لاگ حالا دلیل دقیق را می‌نویسد؛ برای ظرفیت بیشتر چند Deployment ID (ترجیحاً روی اکانت‌های گوگل جدا) در `script_id` بگذارید |
+| گوشی به پروکسی وصل نمی‌شود | `lan_sharing` روشن است ولی رله فقط روی ۱۲۷.۰.۰.۱ گوش می‌داد | برطرف شد — رله‌ای که از پنل استارت می‌شود هم `lan_sharing` را رعایت می‌کند. آدرسی که در «وضعیت» می‌بینید همان چیزی است که واقعاً bind شده |
 | «تست اتصال» ناموفق | Deployment ID اشتباه، یا `Who has access` ≠ Anyone، یا `auth_key` با `Code.gs` یکی نیست | کد را دوباره تولید و جای‌گذاری کنید و deployment تازه بسازید |
 | اولین درخواست ۳ تا ۵ ثانیه | Apps Script باید container را بیدار کند | چند Deployment ID + `parallel_relay: 2` |
-| ChatGPT باز نمی‌شود، بقیه کار می‌کنند | IP خروجی کلودفلر بلاک شده | [بخش AI](#ai) |
 | با بستن ترمینال قطع می‌شود | پنل وابسته به ترمینال اجرا شده | `./scripts/aras-panel.sh start` |
 | `Address already in use` | نمونه‌ی دیگری در حال اجراست | `./scripts/aras-panel.sh stop` یا پورت را عوض کنید |
 | رمز پنل فراموش شده | — | `panel/data/panel.json` را پاک کنید؛ کانفیگ و کاربران می‌مانند |
@@ -935,10 +776,6 @@ python -m panel.licensing verify --file panel/data/license.key
 ```bash
 # لاگ اسکریپت پس‌زمینه
 ./scripts/aras-panel.sh logs
-
-# لاگ فورواردر روی VPS
-journalctl -u aras-forwarder -f
-journalctl -u aras-exit -f
 ```
 
 ---
@@ -1005,9 +842,8 @@ Aras-GP/
 │   ├── domain_fronter.py   Domain Fronting، چرخش SNI، HTTP/2
 │   ├── proxy_server.py     پروکسی HTTP و SOCKS5
 │   ├── account_manager.py  احراز هویت و شمارش per-user
-│   ├── upstream_proxy.py   کلاینت SOCKS5 برای خروجی VPS
 │   └── mitm.py             تولید گواهی محلی
-├── scripts/                اجرای پس‌زمینه + نصب روی VPS
+├── scripts/                اجرای پس‌زمینه
 ├── deploy/                 کد Worker و Apps Script
 └── docs/screenshots/       تصاویر این README
 ```
@@ -1107,11 +943,6 @@ generator, a complete configuration builder, saved relays with passive
 automatic failover, and a real per-connection authentication layer
 (HTTP Basic + SOCKS5 RFC 1929) with per-user traffic quotas and automatic
 cut-off.
-
-For services that reject Cloudflare Workers egress (OpenAI and friends), two
-installers set up an exit on your own VPS — one that keeps domain fronting
-intact by routing through the Worker, and a faster direct SOCKS5 one. Both give
-you a stable outbound IP.
 
 The panel is fully offline: no external CDN, no telemetry, no phone-home, no
 remote kill switch. Its only outbound call is `api.cloudflare.com` during a

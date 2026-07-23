@@ -141,6 +141,13 @@ class DomainFronter:
         self._per_site: dict[str, HostStat] = {}
         self._stats_task: asyncio.Task | None = None
 
+        # Why the relay is failing, in words the operator can act on. Set by
+        # _note_relay_failure, cleared by the first response that works, and
+        # read by the panel's status page.
+        self.last_error: str = ""
+        self.last_error_at: float = 0.0
+        self._last_error_log = 0.0
+
         self.auth_key = config.get("auth_key", "")
         self.verify_ssl = config.get("verify_ssl", True)
         self._relay_timeout = self._cfg_float(
@@ -152,10 +159,6 @@ class DomainFronter:
         self._max_response_body_bytes = self._cfg_int(
             config, "max_response_body_bytes", MAX_RESPONSE_BODY_BYTES,
             minimum=1024,
-        )
-
-        self._forwarder_hosts = self._load_host_rules(
-            config.get("forwarder_hosts", [])
         )
 
         # Connection pool — TTL-based, pre-warmed, with concurrency control
@@ -643,6 +646,82 @@ class DomainFronter:
 
     # ── Per-host stats ────────────────────────────────────────────
 
+    #: Failure pages Apps Script serves instead of our JSON, mapped to what
+    #: the operator has to do about them. Without this the relay reported
+    #: "502 No JSON: <!DOCTYPE html…" for every one of them, which is the same
+    #: message whether the daily quota ran out, the deployment is private, or
+    #: the ID is wrong — three problems with three different fixes.
+    _RELAY_DIAGNOSTICS: tuple[tuple[str, str], ...] = (
+        ("too many times for one day",
+         "Apps Script daily quota is exhausted. Google resets it at midnight "
+         "US Pacific time. Add another script deployment (ideally on a second "
+         "Google account) and put both IDs in script_id to spread the load."),
+        ("exceeded maximum execution time",
+         "An Apps Script execution hit Google's runtime limit. Usually one "
+         "very large response — lower max_response_body_bytes or let the "
+         "chunked downloader handle that file type."),
+        ("service invoked too many times",
+         "Apps Script call quota is exhausted for today. Add a second script "
+         "deployment, or wait for the quota to reset."),
+        ("authorization is required to perform that action",
+         "The deployment is not public. Redeploy Code.gs with 'Execute as: "
+         "Me' and 'Who has access: Anyone'."),
+        ("serviceloginauth",
+         "Apps Script is answering with a Google sign-in page, so the "
+         "deployment is not public. Redeploy with 'Who has access: Anyone'."),
+        ("accounts.google.com/servicelogin",
+         "Apps Script is answering with a Google sign-in page, so the "
+         "deployment is not public. Redeploy with 'Who has access: Anyone'."),
+        ("sorry, unable to open the file",
+         "Apps Script cannot open the deployment. The deployment ID in "
+         "script_id is wrong, or that deployment was deleted."),
+        ("script function not found",
+         "The deployed script has no doPost — paste Code.gs into the project "
+         "and redeploy."),
+        ("moved temporarily",
+         "The relay was redirected away from the script. The deployment ID is "
+         "probably stale; generate a new deployment and update script_id."),
+    )
+
+    def _diagnose_relay_body(self, text: str) -> str:
+        """Turn an Apps Script failure page into an actionable sentence."""
+        lowered = text.lower()
+        for marker, explanation in self._RELAY_DIAGNOSTICS:
+            if marker in lowered:
+                return explanation
+        return ""
+
+    def _diagnose_relay_error(self, error: str) -> str:
+        """Same, for the ``{"e": …}`` errors Code.gs returns itself."""
+        lowered = str(error).lower()
+        if "unauthorized" in lowered:
+            return ("auth_key mismatch: the key in config.json is not the "
+                    "AUTH_KEY constant inside the deployed Code.gs. Regenerate "
+                    "Code.gs from the panel and redeploy it.")
+        if "invalid worker response" in lowered:
+            return ("The Apps Script reached the Cloudflare Worker but could "
+                    "not parse its answer — check that WORKER_URL in Code.gs "
+                    "points at the deployed worker.")
+        return self._diagnose_relay_body(str(error))
+
+    def _note_relay_failure(self, detail: str, advice: str = "") -> None:
+        """Record why the relay is failing and log it — but only once a minute.
+
+        A dead relay fails on every request; logging each one buries the
+        explanation in thousands of identical lines and is why this never got
+        noticed. The panel reads ``last_error`` for the status page.
+        """
+        self.last_error = advice or detail
+        self.last_error_at = time.time()
+        now = time.monotonic()
+        if now - self._last_error_log < 60.0:
+            return
+        self._last_error_log = now
+        if advice:
+            log.error("Relay is failing: %s", advice)
+        else:
+            log.error("Relay is failing: %s", detail[:200])
+
     def _record_site(self, url: str, bytes_: int, latency_ns: int,
                      errored: bool) -> None:
         host = self._host_key(url)
@@ -682,6 +761,8 @@ class DomainFronter:
             "blacklisted_scripts": blacklisted,
             "sni_rotation": list(self._sni_hosts),
             "parallel_relay": self._parallel_relay,
+            "last_error": self.last_error,
+            "last_error_at": self.last_error_at,
         }
 
     async def _stats_logger(self):
@@ -1579,13 +1660,6 @@ class DomainFronter:
             ct = headers.get("Content-Type") or headers.get("content-type")
             if ct:
                 payload["ct"] = ct
-        # Only emit 'f' when scoped; Worker treats missing 'f' as forward (legacy compat).
-        exact, suffixes = self._forwarder_hosts
-        if exact or suffixes:
-            host = urlparse(url).hostname or ""
-            payload["f"] = 1 if self._host_matches_rules(
-                host, self._forwarder_hosts
-            ) else 0
         return payload
 
     @classmethod
@@ -2225,6 +2299,7 @@ class DomainFronter:
         """Parse JSON from Apps Script and reconstruct an HTTP response."""
         text = body.decode(errors="replace").strip()
         if not text:
+            self._note_relay_failure("empty response from Apps Script")
             return self._error_response(502, "Empty response from relay")
 
         try:
@@ -2237,7 +2312,15 @@ class DomainFronter:
                 except json.JSONDecodeError:
                     return self._error_response(502, f"Bad JSON: {text[:200]}")
             else:
-                return self._error_response(502, f"No JSON: {text[:200]}")
+                # Apps Script answered with a page rather than our JSON. That
+                # page usually says exactly what is wrong; read it instead of
+                # echoing raw HTML at the browser.
+                advice = self._diagnose_relay_body(text)
+                self._note_relay_failure(f"non-JSON response: {text[:200]}",
+                                         advice)
+                return self._error_response(
+                    502, advice or f"No JSON: {text[:200]}",
+                )
 
         return self._parse_relay_json(data)
 
@@ -2252,20 +2335,33 @@ class DomainFronter:
         except json.JSONDecodeError:
             m = re.search(r'\{.*\}', text, re.DOTALL)
             if not m:
-                raise _RelayBadResponse(f"non-JSON: {text[:120]}")
+                advice = self._diagnose_relay_body(text)
+                self._note_relay_failure(f"non-JSON response: {text[:200]}",
+                                         advice)
+                raise _RelayBadResponse(advice or f"non-JSON: {text[:120]}")
             try:
                 data = json.loads(m.group())
             except json.JSONDecodeError:
                 raise _RelayBadResponse(f"bad JSON: {text[:120]}")
 
         if "e" in data:
+            self._note_relay_failure(f"relay error: {data['e']}",
+                                     self._diagnose_relay_error(data["e"]))
             raise _RelayBadResponse(f"relay error: {data['e']}")
         return self._parse_relay_json(data)
 
     def _parse_relay_json(self, data: dict) -> bytes:
         """Convert a parsed relay JSON dict to raw HTTP response bytes."""
         if "e" in data:
-            return self._error_response(502, f"Relay error: {data['e']}")
+            advice = self._diagnose_relay_error(data["e"])
+            self._note_relay_failure(f"relay error: {data['e']}", advice)
+            return self._error_response(
+                502, advice or f"Relay error: {data['e']}",
+            )
+
+        # A parsed response means the chain works; stop reporting a stale
+        # failure on the status page.
+        self.last_error = ""
 
         status = data.get("s", 200)
         resp_headers = data.get("h", {})

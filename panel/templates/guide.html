@@ -162,53 +162,6 @@
   </div>
 </section>
 
-<!-- AI -->
-<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
-  <div class="ar-card__head">
-    <h2 class="ar-card__title">{{ icon('zap', 18) }} ChatGPT و سرویس‌های AI</h2>
-  </div>
-  <p class="ar-card__sub">
-    ترافیکی که از Cloudflare Workers خارج می‌شود با IP کلودفلر به مقصد می‌رسد و
-    OpenAI آن رنج را مسدود کرده — خطای «Unable to load site» با Ray ID.
-    این داخل رله قابل حل نیست و به یک خروجی دیگر نیاز دارد: یک VPS.
-  </p>
-  <div class="ar-grid ar-grid--2">
-    <div>
-      <h3 class="ar-section-title" style="margin-top:0">روش امن — از مسیر گوگل</h3>
-      <p class="ar-hint" style="line-height:1.9">
-        Worker درخواست را به VPS شما فوروارد می‌کند. ISP همچنان فقط ترافیک گوگل
-        می‌بیند و مقصد IP ثابت VPS شما را. <b>این روش پیشنهادی است.</b>
-      </p>
-      <div class="ar-code ar-code--cmd" style="margin-top:var(--ar-s3)">
-        <div class="ar-code__bar"><span class="ar-mono">روی VPS</span>
-          <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#g-fwd"
-                  data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button></div>
-        <pre id="g-fwd">sudo bash install-forwarder.sh --domain fwd.example.com
-# یا بدون دامنه:
-sudo bash install-forwarder.sh --tunnel</pre>
-      </div>
-    </div>
-    <div>
-      <h3 class="ar-section-title" style="margin-top:0">روش سریع — مستقیم</h3>
-      <p class="ar-hint" style="line-height:1.9">
-        رله مستقیم به SOCKS5 روی VPS وصل می‌شود. دو هاپ کمتر و سریع‌تر، ولی
-        اتصال به VPS برای ISP قابل دیدن است و Domain Fronting ندارد.
-      </p>
-      <div class="ar-code ar-code--cmd" style="margin-top:var(--ar-s3)">
-        <div class="ar-code__bar"><span class="ar-mono">روی VPS</span>
-          <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#g-exit"
-                  data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button></div>
-        <pre id="g-exit">sudo bash install-exit-node.sh</pre>
-      </div>
-    </div>
-  </div>
-  <p class="ar-hint" style="margin-top:var(--ar-s4)">
-    هر دو اسکریپت آخر کارشان یک خط به شما می‌دهند که در
-    <a href="{{ url_for('settings_page') }}">تنظیمات</a> وارد می‌کنید.
-    همین کار <b>IP ثابت</b> هم به شما می‌دهد.
-  </p>
-</section>
-
 <!-- عیب‌یابی -->
 <section class="ar-card ar-reveal">
   <div class="ar-card__head">
