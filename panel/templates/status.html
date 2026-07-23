@@ -181,7 +181,37 @@
 بعد مرورگر را کامل ببندید (⌘Q) و دوباره باز کنید.
     </div>
   </div>
+</div>
 
+{# CAهای قدیمیِ خودمان: هم‌نام این CA ولی با کلید دیگر. مرورگر ممکن است یکی
+   از آن‌ها را برای بررسی امضای برگه انتخاب کند و خطای گواهی بدهد — حتی وقتی
+   CA فعلی درست نصب شده است. برای همین جدا از کارت بالا نشان داده می‌شود. #}
+{% if status.ca_stale %}
+<div class="ar-note ar-note--warn" style="margin-top:var(--ar-s2)">
+  {{ icon('alert', 15) }}
+  <div>
+<b>{{ status.ca_stale|length }} گواهی قدیمی با همین نام هنوز روی این دستگاه نصب است.</b>
+هر بار که پوشه‌ی <span class="ar-mono ar-ltr">ca/</span> دوباره ساخته شود
+(کلون تازه یا ریست) یک CA جدید با همان نام <span class="ar-mono ar-ltr">Aras-GP</span>
+ساخته می‌شود و قبلی‌ها می‌مانند. مرورگر ممکن است یکی از آن‌ها را برای بررسی
+امضا انتخاب کند و خطای گواهی بدهد، در حالی‌که CA فعلی درست نصب شده است.
+<ul class="ar-mono ar-ltr" style="margin:var(--ar-s3) 0;font-size:12px;opacity:.8">
+  {% for item in status.ca_stale %}
+  <li>{{ item.fingerprint[:24] }}… — {{ item.keychain }}</li>
+  {% endfor %}
+</ul>
+<div class="ar-code ar-code--cmd">
+  <div class="ar-code__bar">
+    <span class="ar-mono">Terminal</span>
+    <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#ca-stale-cmd"
+            data-copy-label="دستور" type="button">{{ icon('copy', 13) }}</button>
+  </div>
+  <pre id="ca-stale-cmd">{{ stale_command }}</pre>
+</div>
+گواهی فعلی دست‌نخورده می‌ماند؛ فقط قدیمی‌ها پاک می‌شوند. بعد مرورگر را ⌘Q کنید.
+  </div>
+</div>
+{% endif %}
 
 <section class="ar-card ar-reveal">
   <div class="ar-card__head">

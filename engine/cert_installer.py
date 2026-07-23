@@ -106,15 +106,44 @@ def _cert_thumbprint(cert_path: str) -> str:
         return ""
 
 
+def cert_fingerprint(cert_path: str) -> str:
+    """SHA-256 of a PEM certificate, uppercase hex — its actual identity.
+
+    Every trust question in this file is asked about *this* value. The common
+    name is not an identity: the CA is regenerated whenever ``ca/`` is missing
+    (a fresh clone, a reset), and each new one is called "Aras-GP" too.
+    """
+    try:
+        from cryptography import x509 as _x509
+        from cryptography.hazmat.primitives import hashes as _hashes
+        with open(cert_path, "rb") as f:
+            cert = _x509.load_pem_x509_certificate(f.read())
+        return cert.fingerprint(_hashes.SHA256()).hex().upper()
+    except Exception:
+        return ""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # macOS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _install_macos(cert_path: str, cert_name: str) -> bool:
-    """Install into the login keychain (per-user, no sudo required)."""
-    login_keychain = os.path.expanduser("~/Library/Keychains/login.keychain-db")
-    if not os.path.exists(login_keychain):
-        login_keychain = os.path.expanduser("~/Library/Keychains/login.keychain")
+    """Install into the login keychain (per-user, no sudo required).
+
+    Success is not "the command exited 0" — it is "the OS now accepts this
+    root for TLS". Those came apart on machines carrying an older Aras-GP CA,
+    so the result is confirmed with a real trust evaluation before returning.
+    """
+    login_keychain = _login_keychain()
+
+    stale = stale_macos_cas(cert_path, cert_name)
+    if stale:
+        log.warning(
+            "%d older %r CA(s) are still installed. They are what the browser "
+            "may be trusting instead of this one; remove them with "
+            "'python main.py --uninstall-cert --stale-only'.",
+            len(stale), cert_name,
+        )
 
     try:
         _run([
@@ -124,30 +153,127 @@ def _install_macos(cert_path: str, cert_name: str) -> bool:
             cert_path,
         ])
         log.info("Certificate installed in macOS login keychain.")
-        return True
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         log.warning("login keychain install failed: %s. Trying system keychain (needs sudo)…", exc)
+        try:
+            _run([
+                "sudo", "security", "add-trusted-cert",
+                "-d", "-r", "trustRoot",
+                "-k", SYSTEM_KEYCHAIN,
+                cert_path,
+            ])
+            log.info("Certificate installed in macOS system keychain.")
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc2:
+            log.error("System keychain install failed: %s", exc2)
+            return False
 
+    if not _macos_would_trust(cert_path):
+        log.error(
+            "The certificate was added but macOS still will not trust it for "
+            "TLS. Run this and restart the browser:\n"
+            "  sudo security add-trusted-cert -d -r trustRoot \\\n"
+            "    -k %s %s", SYSTEM_KEYCHAIN, cert_path,
+        )
+        return False
+    return True
+
+
+SYSTEM_KEYCHAIN = "/Library/Keychains/System.keychain"
+
+
+def _login_keychain() -> str:
+    path = os.path.expanduser("~/Library/Keychains/login.keychain-db")
+    if not os.path.exists(path):
+        path = os.path.expanduser("~/Library/Keychains/login.keychain")
+    return path
+
+
+def _keychain_fingerprints(cert_name: str, keychain: str | None = None) -> list[str]:
+    """SHA-256 fingerprints of every cert named *cert_name* in a keychain.
+
+    ``security find-certificate -Z`` prints a "SHA-256 hash: …" line per match;
+    with no keychain argument it searches the whole default list.
+    """
+    cmd = ["security", "find-certificate", "-a", "-c", cert_name, "-Z"]
+    if keychain:
+        cmd.append(keychain)
     try:
-        _run([
-            "sudo", "security", "add-trusted-cert",
-            "-d", "-r", "trustRoot",
-            "-k", "/Library/Keychains/System.keychain",
-            cert_path,
-        ])
-        log.info("Certificate installed in macOS system keychain.")
+        result = _run(cmd, check=False)
+    except Exception:
+        return []
+    found = []
+    for line in result.stdout.decode(errors="replace").splitlines():
+        if line.startswith("SHA-256 hash:"):
+            found.append(line.split(":", 1)[1].strip().upper())
+    return found
+
+
+def _macos_would_trust(cert_path: str) -> bool:
+    """Ask the OS the question the browser asks: would it accept this root?
+
+    ``security verify-cert`` runs the same trust evaluation Safari and curl
+    use, so a pass here means an intercepted page validates and a fail means
+    it does not. Nothing else in this file is allowed to answer that question
+    by inspecting file paths or names.
+    """
+    try:
+        result = _run(["security", "verify-cert", "-c", cert_path, "-p", "ssl",
+                       "-l", "-L", "-q"], check=False)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _is_trusted_macos(cert_name: str, cert_path: str) -> bool:
+    """True only when *this exact certificate* is installed and trusted.
+
+    The old check was ``find-certificate -c Aras-GP`` and returned True if any
+    certificate with that common name existed in any keychain. Because the CA
+    is regenerated whenever ``ca/`` goes missing, a machine ends up holding
+    several "Aras-GP" roots; the check then reported "trusted" while the
+    browser rejected every intercepted site, because the root it trusts is a
+    *different* CA from the one now signing the leaves. That failure is silent
+    and looks exactly like a broken proxy.
+    """
+    fingerprint = cert_fingerprint(cert_path)
+    if not fingerprint:
+        return False
+    if fingerprint not in _keychain_fingerprints(cert_name):
+        return False
+    return _macos_would_trust(cert_path)
+
+
+def stale_macos_cas(cert_path: str, cert_name: str = "") -> list[tuple[str, str]]:
+    """Previously installed CAs that share our name but not our key.
+
+    Each one is a root the browser may still trust and we can no longer sign
+    with. Returned as ``(fingerprint, keychain)`` so the caller can name them
+    precisely instead of deleting by common name and taking the live CA with
+    it.
+    """
+    name = cert_name or CERT_NAME
+    current = cert_fingerprint(cert_path)
+    stale: list[tuple[str, str]] = []
+    for keychain in (SYSTEM_KEYCHAIN, _login_keychain()):
+        for found in _keychain_fingerprints(name, keychain):
+            if found != current:
+                stale.append((found, keychain))
+    return stale
+
+
+def remove_macos_cert(fingerprint: str, keychain: str) -> bool:
+    """Delete one certificate, addressed by fingerprint, from one keychain."""
+    cmd = ["security", "delete-certificate", "-Z", fingerprint, "-t"]
+    if keychain == SYSTEM_KEYCHAIN:
+        cmd = ["sudo"] + cmd
+    cmd.append(keychain)
+    try:
+        _run(cmd)
+        log.info("Removed stale CA %s… from %s",
+                 fingerprint[:16], os.path.basename(keychain))
         return True
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        log.error("System keychain install failed: %s", exc)
-
-    return False
-
-
-def _is_trusted_macos(cert_name: str) -> bool:
-    try:
-        result = _run(["security", "find-certificate", "-a", "-c", cert_name])
-        return bool(result.stdout.strip())
-    except Exception:
+        log.warning("Could not remove stale CA %s…: %s", fingerprint[:16], exc)
         return False
 
 
@@ -545,13 +671,13 @@ def _uninstall_linux(cert_path: str, cert_name: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def is_ca_trusted(cert_path: str) -> bool:
-    """Return True if the CA cert appears to be already installed."""
+    """Return True if *this* CA certificate is installed and trusted."""
     system = platform.system()
     try:
         if system == "Windows":
             return _is_trusted_windows(cert_path)
         if system == "Darwin":
-            return _is_trusted_macos(CERT_NAME)
+            return _is_trusted_macos(CERT_NAME, cert_path)
         return _is_trusted_linux(cert_path, CERT_NAME)
     except Exception:
         return False
@@ -585,6 +711,30 @@ def install_ca(cert_path: str, cert_name: str = CERT_NAME) -> bool:
     _install_firefox(cert_path, cert_name)
 
     return ok
+
+
+def remove_stale_cas(cert_path: str, cert_name: str = CERT_NAME) -> int:
+    """Remove older CAs of ours, keeping the one currently in use.
+
+    Deleting by common name would take the live CA with them, so each is
+    addressed by its own fingerprint. Returns how many were removed.
+    """
+    if platform.system() != "Darwin":
+        log.info("Stale-CA cleanup is only implemented for macOS.")
+        return 0
+
+    stale = stale_macos_cas(cert_path, cert_name)
+    if not stale:
+        log.info("No stale %r CAs found — nothing to remove.", cert_name)
+        return 0
+
+    removed = 0
+    for fingerprint, keychain in stale:
+        if remove_macos_cert(fingerprint, keychain):
+            removed += 1
+    log.info("Removed %d of %d stale CA(s). Restart the browser.",
+             removed, len(stale))
+    return removed
 
 
 def uninstall_ca(cert_path: str, cert_name: str = CERT_NAME) -> bool:

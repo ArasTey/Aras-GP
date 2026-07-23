@@ -62,7 +62,6 @@ FIELDS: tuple[tuple[str, str, object], ...] = (
     ("chunked_download_max_chunks",  "int",    256),
     ("block_hosts",                  "list",   None),
     ("bypass_hosts",                 "list",   None),
-    ("forwarder_hosts",              "list",   None),
     ("direct_google_exclude",        "list",   None),
     ("direct_google_allow",          "list",   None),
     ("youtube_via_relay",            "bool",   False),

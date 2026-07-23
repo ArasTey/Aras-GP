@@ -88,15 +88,6 @@
     </div>
 
     <div class="ar-field">
-      <label class="ar-label" for="cf-upstream">{{ icon('link', 15) }} آدرس Upstream Forwarder (اختیاری)</label>
-      <input class="ar-input ar-mono" type="text" id="cf-upstream" dir="ltr"
-             value="{{ cf.upstream_forwarder_url }}" placeholder="https://forwarder.example.com">
-      <span class="ar-hint">
-        اگر از کامپوننت <span class="ar-mono ar-ltr">deploy/upstream_forwarder</span>
-        استفاده می‌کنید، این مقدار به‌عنوان متغیر
-        <span class="ar-mono ar-ltr">UPSTREAM_FORWARDER_URL</span> به Worker بایند می‌شود.
-      </span>
-    </div>
   </div>
 
   <div class="ar-row" style="margin-top:var(--ar-s5)">
@@ -301,7 +292,6 @@
   var token = document.getElementById("cf-token");
   var account = document.getElementById("cf-account");
   var name = document.getElementById("cf-name");
-  var upstream = document.getElementById("cf-upstream");
   var remember = document.getElementById("cf-remember");
   var result = document.getElementById("cf-result");
 
@@ -336,7 +326,6 @@
       api_token: token.value,
       account_id: account.value,
       script_name: name.value,
-      upstream_forwarder_url: upstream.value,
       remember_token: remember.checked ? "1" : ""
     }).then(function (data) {
       if (!data.ok) {

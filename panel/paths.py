@@ -27,7 +27,6 @@ CA_DIR = os.path.join(PROJECT_ROOT, "ca")
 # Deploy templates shipped with the relay.
 WORKER_TEMPLATE = os.path.join(PROJECT_ROOT, "deploy", "cloudflare-worker", "worker.js")
 GAS_TEMPLATE = os.path.join(PROJECT_ROOT, "deploy", "gas", "Code.gs")
-FORWARDER_ENV = os.path.join(PROJECT_ROOT, "deploy", "upstream_forwarder", ".env")
 
 
 def ensure_dirs() -> None:

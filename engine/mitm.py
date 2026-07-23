@@ -10,6 +10,7 @@ The user must install ca/ca.crt in their browser's trusted CAs once.
 Requires: pip install cryptography
 """
 
+import collections
 import datetime
 import logging
 import os
@@ -32,6 +33,15 @@ CA_DIR = os.path.join(_PROJECT_ROOT, "ca")
 CA_KEY_FILE = os.path.join(CA_DIR, "ca.key")
 CA_CERT_FILE = os.path.join(CA_DIR, "ca.crt")
 
+#: Subject CN of the CA. The installer and the panel's trust check both need
+#: it, and hard-coding the same string in three files is how they drifted.
+CERT_COMMON_NAME = "Aras-GP"
+
+#: How many per-host TLS contexts to keep. Each one holds an OpenSSL context
+#: and a certificate, so an unbounded cache grew without limit across a long
+#: browsing session — a few thousand ad/CDN hostnames is an ordinary evening.
+MAX_CACHED_CONTEXTS = 512
+
 
 # Filename-safe form of an SNI / hostname.  Windows forbids colons,
 # question marks, etc., so IPv6 literals (and stray Unicode) must be
@@ -48,9 +58,33 @@ class MITMCertManager:
     def __init__(self):
         self._ca_key = None
         self._ca_cert = None
-        self._ctx_cache: dict[str, ssl.SSLContext] = {}
+        self._ctx_cache: collections.OrderedDict[str, ssl.SSLContext] = (
+            collections.OrderedDict()
+        )
         self._cert_dir = tempfile.mkdtemp(prefix="domainfront_certs_")
         self._ensure_ca()
+        # One RSA key, shared by every leaf certificate we mint.
+        #
+        # Generating a fresh 2048-bit key per hostname cost ~150 ms of pure
+        # CPU *on the event loop* — every new host froze the entire proxy,
+        # and one page load touching thirty domains stalled it for seconds.
+        # Signing with a key we already hold takes about a millisecond. This
+        # is what mitmproxy and Charles do, and it costs nothing in safety:
+        # the key never leaves this process, and possessing the CA key (which
+        # is on the same disk) already lets an attacker mint anything.
+        self._leaf_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        )
+        self._leaf_key_pem = self._leaf_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+
+    def fingerprint(self) -> str:
+        """SHA-256 of the CA certificate, uppercase hex — the identity that
+        matters when asking whether *this* CA is the one the OS trusts."""
+        return self._ca_cert.fingerprint(hashes.SHA256()).hex().upper()
 
     def _ensure_ca(self):
         if os.path.exists(CA_KEY_FILE) and os.path.exists(CA_CERT_FILE):
@@ -71,8 +105,8 @@ class MITMCertManager:
             public_exponent=65537, key_size=2048
         )
         subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "Aras-GP"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Aras-GP"),
+            x509.NameAttribute(NameOID.COMMON_NAME, CERT_COMMON_NAME),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, CERT_COMMON_NAME),
         ])
         now = datetime.datetime.now(datetime.timezone.utc)
         self._ca_cert = (
@@ -134,30 +168,44 @@ class MITMCertManager:
         log.warning(">>> Install this file in your browser's Trusted Root CAs! <<<")
 
     def get_server_context(self, domain: str) -> ssl.SSLContext:
-        if domain not in self._ctx_cache:
-            key_pem, cert_pem = self._generate_domain_cert(domain)
+        cached = self._ctx_cache.get(domain)
+        if cached is not None:
+            self._ctx_cache.move_to_end(domain)
+            return cached
 
-            safe = _safe_domain_filename(domain)
-            cert_file = os.path.join(self._cert_dir, f"{safe}.crt")
-            key_file = os.path.join(self._cert_dir, f"{safe}.key")
+        key_pem, cert_pem = self._generate_domain_cert(domain)
 
-            ca_pem = self._ca_cert.public_bytes(serialization.Encoding.PEM)
-            with open(cert_file, "wb") as f:
-                f.write(cert_pem + ca_pem)
-            with open(key_file, "wb") as f:
-                f.write(key_pem)
+        safe = _safe_domain_filename(domain)
+        cert_file = os.path.join(self._cert_dir, f"{safe}.crt")
+        key_file = os.path.join(self._cert_dir, f"{safe}.key")
 
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            ctx.set_alpn_protocols(["http/1.1"])
+        ca_pem = self._ca_cert.public_bytes(serialization.Encoding.PEM)
+        with open(cert_file, "wb") as f:
+            f.write(cert_pem + ca_pem)
+        with open(key_file, "wb") as f:
+            f.write(key_pem)
+
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.set_alpn_protocols(["http/1.1"])
+        try:
             ctx.load_cert_chain(cert_file, key_file)
-            self._ctx_cache[domain] = ctx
+        finally:
+            # load_cert_chain reads both files immediately, so they are dead
+            # weight afterwards. Removing them keeps the private key off disk
+            # and stops the temp directory growing one pair per hostname.
+            for path in (cert_file, key_file):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
-        return self._ctx_cache[domain]
+        self._ctx_cache[domain] = ctx
+        while len(self._ctx_cache) > MAX_CACHED_CONTEXTS:
+            self._ctx_cache.popitem(last=False)
+        return ctx
 
     def _generate_domain_cert(self, domain: str):
-        key = rsa.generate_private_key(
-            public_exponent=65537, key_size=2048
-        )
+        key = self._leaf_key
         subject = x509.Name([
             x509.NameAttribute(NameOID.COMMON_NAME, domain[:64] or "unknown"),
         ])
@@ -227,10 +275,5 @@ class MITMCertManager:
             .sign(self._ca_key, hashes.SHA256())
         )
 
-        key_pem = key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption(),
-        )
         cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-        return key_pem, cert_pem
+        return self._leaf_key_pem, cert_pem

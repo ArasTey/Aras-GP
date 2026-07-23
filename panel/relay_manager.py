@@ -33,7 +33,9 @@ import threading
 import time
 from collections import deque
 
-from cert_installer import is_ca_trusted          # from engine/
+from cert_installer import (                      # from engine/
+    SYSTEM_KEYCHAIN, is_ca_trusted, stale_macos_cas,
+)
 from mitm import CA_CERT_FILE                     # from engine/
 from proxy_server import ProxyServer              # from engine/
 
@@ -301,7 +303,7 @@ class RelayManager:
         empty = {
             "per_site": [], "blacklisted_scripts": [], "sni_rotation": [],
             "parallel_relay": 0, "accounts": [], "auth_required": False,
-            "socks_active": False,
+            "socks_active": False, "last_error": "", "last_error_at": 0.0,
             "account_totals": {"accounts": 0, "active": 0, "connections": 0,
                                "up_bytes": 0, "down_bytes": 0},
         }
@@ -486,9 +488,18 @@ class RelayManager:
             "running": self.running,
             "started_at": self.started_at,
             "uptime": (time.time() - self.started_at) if self.started_at else 0,
-            "last_error": self.last_error,
+            # A relay that is up but whose Apps Script chain is refusing every
+            # request is the case that used to look like "it just stopped".
+            # The engine's explanation outranks the manager's own, which only
+            # covers start-up failures.
+            "last_error": ((snapshot or {}).get("last_error")
+                           or self.last_error),
             "last_success_at": self.last_success_at,
-            "listen_host": config.get("listen_host", "127.0.0.1"),
+            # What the sockets are actually bound to while running, not what
+            # the file asks for — those differ under lan_sharing, and the
+            # address printed here is the one the operator types into a phone.
+            "listen_host": (self._server.host if self._server
+                            else config.get("listen_host", "127.0.0.1")),
             "listen_port": config.get("listen_port", 8085),
             "socks5_enabled": config.get("socks5_enabled", True),
             "socks5_port": config.get("socks5_port", 1080),
@@ -513,6 +524,7 @@ class RelayManager:
             "ca_present": os.path.exists(CA_CERT_FILE),
             "ca_trusted": _ca_trusted_cached(),
             "ca_path": CA_CERT_FILE,
+            "ca_stale": _stale_cached(),
             "failover": self.failover.snapshot(),
         }
 
@@ -520,6 +532,7 @@ class RelayManager:
 # ── CA trust check (cached: the OS call is slow on macOS/Windows) ──────
 
 _ca_cache: dict = {"value": None, "at": 0.0}
+_stale_cache: dict = {"value": None, "at": 0.0}
 _CA_CACHE_TTL = 30.0
 
 
@@ -534,63 +547,46 @@ def _ca_trusted_cached(force: bool = False) -> bool:
     return bool(_ca_cache["value"])
 
 
+def _stale_cached(force: bool = False) -> list[dict]:
+    now = time.time()
+    if (force or _stale_cache["value"] is None
+            or now - _stale_cache["at"] > _CA_CACHE_TTL):
+        try:
+            _stale_cache["value"] = _stale_cas()
+        except Exception:
+            _stale_cache["value"] = []
+        _stale_cache["at"] = now
+    return list(_stale_cache["value"] or [])
+
+
 def _really_trusted() -> bool:
-    """Report trust the way the *browser* sees it, not the way the OS API does.
+    """Report trust the way the *browser* sees it.
 
-    On macOS the upstream check is ``security find-certificate -a -c <name>``,
-    which searches every keychain — including the login keychain that
-    ``install_ca`` writes to without sudo. Chrome and Safari only accept a root
-    CA from the **System** keychain, so that check happily reports "trusted"
-    while the browser still shows ERR_CERT_AUTHORITY_INVALID.
-
-    A status page that says "trusted" when the browser disagrees is worse than
-    no status page, so on macOS we ask the narrower question the browser
-    actually asks.
+    ``is_ca_trusted`` now identifies the CA by SHA-256 and finishes with a real
+    trust evaluation, so there is one answer for every platform and the panel
+    no longer keeps a second, weaker opinion of its own.
     """
     if not os.path.exists(CA_CERT_FILE):
         return False
-
-    if platform.system() == "Darwin":
-        return _in_macos_system_keychain()
-
     return bool(is_ca_trusted(CA_CERT_FILE))
 
 
-def _in_macos_system_keychain() -> bool:
-    """True when the CA sits in /Library/Keychains/System.keychain.
+def _stale_cas() -> list[dict]:
+    """Older CAs of ours the machine still trusts.
 
-    Reading that keychain does not require sudo — only writing to it does.
+    Every one of them shares our common name and none of them matches our key.
+    A browser picking one of those to verify a leaf we signed reports
+    ERR_CERT_AUTHORITY_INVALID, which reads exactly like a broken proxy — so
+    the status page names them instead of leaving the operator guessing.
     """
+    if platform.system() != "Darwin" or not os.path.exists(CA_CERT_FILE):
+        return []
     try:
-        from mitm import CERT_COMMON_NAME  # optional, older builds lack it
-        name = CERT_COMMON_NAME
+        return [{"fingerprint": fp, "keychain": os.path.basename(kc),
+                 "needs_sudo": kc == SYSTEM_KEYCHAIN}
+                for fp, kc in stale_macos_cas(CA_CERT_FILE)]
     except Exception:
-        name = _cert_common_name()
-
-    if not name:
-        return False
-    try:
-        result = subprocess.run(
-            ["security", "find-certificate", "-c", name,
-             "/Library/Keychains/System.keychain"],
-            capture_output=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def _cert_common_name() -> str:
-    """Read the CN straight out of the certificate file."""
-    try:
-        from cryptography import x509
-        with open(CA_CERT_FILE, "rb") as handle:
-            cert = x509.load_pem_x509_certificate(handle.read())
-        return cert.subject.get_attributes_for_oid(
-            x509.oid.NameOID.COMMON_NAME
-        )[0].value
-    except Exception:
-        return ""
+        return []
 
 
 def macos_trust_command() -> str:
@@ -609,7 +605,13 @@ def macos_trust_command() -> str:
 
 
 def refresh_ca_status() -> bool:
+    _stale_cached(force=True)
     return _ca_trusted_cached(force=True)
+
+
+def stale_ca_command() -> str:
+    """Command that removes the older CAs this machine still trusts."""
+    return "python main.py --uninstall-cert --stale-only"
 
 
 manager = RelayManager()
