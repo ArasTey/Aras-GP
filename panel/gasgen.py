@@ -42,12 +42,14 @@ def load_template() -> str:
 def render(auth_key: str, worker_url: str, source: str | None = None) -> str:
     """Return ``Code.gs`` with the two constants filled in."""
     if not auth_key:
-        raise GasError("ابتدا کلید احراز هویت (auth_key) را تنظیم کنید.")
+        # The panel mints this automatically, so reaching here means something
+        # deeper is wrong rather than a step the operator skipped.
+        raise GasError("کلید احراز هویت هنوز ساخته نشده — صفحه‌ی دیپلوی را باز کنید.")
     worker_url = (worker_url or "").strip().rstrip("/")
     if not worker_url:
         raise GasError(
-            "آدرس Worker مشخص نیست. یا مرحله‌ی ۱ (دیپلوی Cloudflare) را انجام "
-            "دهید، یا اگر Worker را دستی ساخته‌اید آدرسش را در کادر روبه‌رو وارد کنید."
+            "هنوز Worker ندارید. اول مرحله‌ی ۱ (دیپلوی Cloudflare Worker) را "
+            "انجام دهید؛ بعد کد Apps Script خودش ساخته می‌شود."
         )
     if not worker_url.startswith("https://"):
         raise GasError("آدرس Worker باید با https:// شروع شود.")
@@ -94,8 +96,8 @@ STEPS: tuple[dict, ...] = (
     {
         "title": "جای‌گذاری کد",
         "body": "همه‌ی محتوای فایل Code.gs را پاک کنید و کد تولیدشده‌ی روبه‌رو "
-                "را جای‌گذاری کنید. این کد از قبل شامل AUTH_KEY و WORKER_URL "
-                "شماست.",
+                "را جای‌گذاری کنید. همه‌چیز از قبل داخلش پر شده — چیزی برای "
+                "ویرایش نیست.",
     },
     {
         "title": "ذخیره پروژه",

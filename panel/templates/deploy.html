@@ -32,17 +32,20 @@
       <div class="ar-note ar-note--info">
         {{ icon('key', 16) }}
         <div>
-          <b>توکن ندارید؟</b> این لینک صفحه‌ی ساخت توکن کلودفلر را با دسترسی‌های
-          لازم <b>از قبل انتخاب‌شده</b> باز می‌کند — فقط
-          «Continue to summary» و بعد «Create Token» را بزنید.
+          <b>توکن ندارید؟</b> این لینک صفحه‌ی ساخت توکن کلودفلر را باز می‌کند.
+          ساده‌ترین راه: از فهرست قالب‌ها روی <b>Use template</b>ِ گزینه‌ی
+          <span class="ar-mono ar-ltr">Edit Cloudflare Workers</span> بزنید،
+          بعد <b>Continue to summary</b> و <b>Create Token</b>.
           <div class="ar-row" style="margin-top:var(--ar-s3)">
             <a class="ar-btn ar-btn--accent ar-btn--sm" target="_blank" rel="noopener noreferrer"
                href="{{ cf_token_url }}">
-              {{ icon('link', 14) }}<span>ساخت توکن با دسترسی آماده</span>
+              {{ icon('link', 14) }}<span>باز کردن صفحه‌ی توکن کلودفلر</span>
             </a>
             <span class="ar-hint">
-              دسترسی‌ها: <span class="ar-mono ar-ltr">Workers Scripts · Edit</span>
-              و <span class="ar-mono ar-ltr">Account Settings · Read</span>
+              اگر دسترسی‌ها از قبل تیک نخورده بودند، دستی این را بدهید:
+              <span class="ar-mono ar-ltr">Account · Workers Scripts · Edit</span>.
+              (اختیاری: <span class="ar-mono ar-ltr">Account Settings · Read</span>
+              تا Account ID هم خودکار پیدا شود.)
             </span>
           </div>
           <div class="ar-hint" style="margin-top:var(--ar-s2)">
@@ -158,7 +161,7 @@
           <span class="ar-mono">Code.gs</span>
           <span id="gas-status">هنوز تولید نشده</span>
         </div>
-        <pre id="gas-code">// روی «تولید Code.gs» بزنید تا کد با AUTH_KEY و WORKER_URL شما ساخته شود.</pre>
+        <pre id="gas-code">// بعد از دیپلوی Worker، کد این‌جا خودکار ساخته می‌شود — کافی است کپی کنید.</pre>
       </div>
 
       <div class="ar-field" style="margin-top:var(--ar-s5)">
@@ -211,8 +214,7 @@
   </div>
   <p class="ar-card__sub">
     وقتی زنجیره‌ات کار کرد، همین‌جا با یک نام ذخیره‌اش کن. دفعه‌ی بعد به‌جای
-    دیپلوی دوباره، فقط رویش کلیک می‌کنی و کانفیگ با همان کلید و شناسه‌ها
-    برمی‌گردد. کلید احراز هویت هم داخل همان رکورد نگه داشته می‌شود.
+    دیپلوی دوباره، فقط رویش کلیک می‌کنی و همان کانفیگ کامل برمی‌گردد.
   </p>
 
   <div class="ar-input-group" style="margin-bottom:var(--ar-s5)">
@@ -323,8 +325,7 @@
         return;
       }
       token.value = "";
-      gasWorkerUrl.value = data.worker_url;   // hand step 2 the fresh URL
-      Aras.toast("Worker با موفقیت مستقر شد.", "success");
+      Aras.toast("Worker مستقر شد — کد Apps Script را هم می‌سازم.", "success");
       result.innerHTML =
         '<div class="ar-note ar-note--info"><div>' +
         "<b>آدرس Worker:</b> " +
@@ -337,6 +338,9 @@
                  (step.detail ? ' — <span class="ar-mono ar-ltr">' +
                   Aras.escape(step.detail) + "</span>" : "") + "</li>";
         }).join("") + "</ul></div></div>";
+      // No refresh, no second click: the moment the Worker is up, its URL and
+      // the auto key are everything Code.gs needs, so generate it right away.
+      generateCode(data.worker_url);
     });
   });
 
@@ -416,24 +420,36 @@
   /* ── Apps Script ── */
   var codeBox = document.getElementById("gas-code");
   var copyBtn = document.getElementById("gas-copy");
+  var savedWorkerUrl = "{{ cf.worker_url or '' }}";
 
-  var gasWorkerUrl = document.getElementById("gas-worker-url");
+  // The only inputs Code.gs needs are the Worker URL and the auth key, and the
+  // panel owns both — the key is generated server-side and the URL is either
+  // the one just deployed or the one already saved. So this takes an optional
+  // URL and otherwise lets the server fill in what it has; nothing is read
+  // from a field the operator has to touch.
+  function generateCode(workerUrl, quiet) {
+    return Aras.post("/api/gas/code", { worker_url: workerUrl || "" })
+      .then(function (data) {
+        if (!data.ok) {
+          if (!quiet) Aras.toast(data.error, "error", 8000);
+          return false;
+        }
+        codeBox.textContent = data.code;
+        copyBtn.disabled = false;
+        document.getElementById("gas-status").textContent = "آماده — کپی کنید و در Apps Script جای‌گذاری کنید";
+        if (!quiet) Aras.toast("کد Apps Script ساخته شد.", "success");
+        return true;
+      });
+  }
+
   Aras.action(document.getElementById("gas-generate"), function () {
-    // Prefer a URL just deployed in this session, then the saved one, then
-    // whatever the operator typed by hand.
     var deployed = (document.getElementById("cf-new-url") || {}).textContent || "";
-    var workerUrl = (deployed || gasWorkerUrl.value || "").trim();
-    gasWorkerUrl.value = workerUrl;
-    return Aras.post("/api/gas/code", {
-      worker_url: workerUrl
-    }).then(function (data) {
-      if (!data.ok) { Aras.toast(data.error, "error", 8000); return; }
-      codeBox.textContent = data.code;
-      copyBtn.disabled = false;
-      document.getElementById("gas-status").textContent = "آماده — با مقادیر شما پر شد";
-      Aras.toast("کد Apps Script تولید شد.", "success");
-    });
+    return generateCode(deployed || savedWorkerUrl);
   });
+
+  // If a Worker is already deployed, the code is ready before the page even
+  // settles — the operator lands on a finished Code.gs, not an empty box.
+  if (savedWorkerUrl) generateCode(savedWorkerUrl, true);
 
   copyBtn.addEventListener("click", function () {
     Aras.copy(codeBox.textContent, "کد Code.gs");
