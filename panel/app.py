@@ -624,7 +624,7 @@ def create_app() -> Flask:
         # Persist only what the operator agreed to keep; the token is stored
         # solely on an explicit opt-in and only in a 0600 file.
         store.update(cloudflare={
-            "account_id": account_id,
+            "account_id": result.get("account_id") or account_id,
             "script_name": result["script_name"],
             "token": token if remember else "",
             "workers_subdomain": result["subdomain"],
