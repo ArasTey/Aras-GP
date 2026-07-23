@@ -189,11 +189,26 @@ def create_app() -> Flask:
         return render_template("dashboard.html", status=manager.status(),
                                chart_window=store.load()["settings"]["chart_window"])
 
+    def _config_with_auth_key() -> dict:
+        """Load the relay config, minting an auth_key if it has none.
+
+        Called from every path that needs the key to exist — the deploy page,
+        Code.gs generation, and starting the relay — so the operator is never
+        asked to produce one and can never be blocked by a missing one.
+        """
+        config = store.load_config() or configgen.defaults()
+        if configgen.ensure_auth_key(config):
+            store.save_config(configgen.strip_internal(config))
+            log.info("auth_key generated automatically")
+        return config
+
     @app.route("/deploy")
     @security.login_required
     def deploy_page():
         state = store.load()
-        config = store.load_config() or {}
+        # The key is created here if absent, so the page never shows a "make a
+        # key first" state and Code.gs below can always be rendered.
+        config = _config_with_auth_key()
         return render_template(
             "deploy.html",
             cf=state["cloudflare"],
@@ -202,7 +217,6 @@ def create_app() -> Flask:
             gas=state["gas"],
             gas_steps=gasgen.STEPS,
             auth_key_set=bool(config.get("auth_key")),
-            auth_key=config.get("auth_key", ""),
             cf_token_url=cloudflare.TOKEN_TEMPLATE_URL,
             history=state["deploy_history"][:12],
         )
@@ -290,9 +304,9 @@ def create_app() -> Flask:
     @app.post("/api/relay/start")
     @security.login_required
     def api_relay_start():
-        config = store.load_config()
-        if config is None:
+        if store.load_config() is None:
             return _fail("هنوز کانفیگی ساخته نشده است.")
+        config = _config_with_auth_key()
         try:
             configgen.validate(config)
         except configgen.ConfigError as exc:
@@ -634,9 +648,12 @@ def create_app() -> Flask:
     @security.login_required
     def api_gas_code():
         body = _json_body()
-        config = store.load_config() or {}
+        config = _config_with_auth_key()
         state = store.load()
-        auth_key = (body.get("auth_key") or config.get("auth_key") or "").strip()
+        # Deliberately not taken from the request: the key is the panel's to
+        # manage, and accepting one from the client is how the two sides used
+        # to drift apart.
+        auth_key = str(config.get("auth_key") or "").strip()
         worker_url = (body.get("worker_url")
                       or state["cloudflare"].get("worker_url") or "").strip()
         try:

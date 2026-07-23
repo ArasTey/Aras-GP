@@ -177,11 +177,13 @@ def main() -> int:
     cfg = load_base_config()
     cfg["mode"] = "apps_script"
 
-    suggested_key = random_auth_key()
+    # Generated, not asked for. The key only has to match on both sides, and
+    # the panel writes it into the Code.gs it hands over, so there is nothing
+    # here for the operator to decide — only something to get wrong.
+    cfg["auth_key"] = random_auth_key()
     print()
     print(bold("Shared password (auth_key)"))
-    print(dim("  Must match AUTH_KEY inside apps_script/Code.gs."))
-    cfg["auth_key"] = prompt("auth_key", default=suggested_key)
+    print(dim("  Generated automatically. The panel puts it into Code.gs for you."))
 
     cfg = configure_apps_script(cfg)
     cfg = configure_network(cfg)
@@ -194,8 +196,8 @@ def main() -> int:
     print(bold("Next step:"))
     print(f"  python main.py")
     print()
-    print(yellow("Reminder: the AUTH_KEY inside apps_script/Code.gs must match the auth_key"))
-    print(yellow("you just entered - otherwise the relay will return 'unauthorized'."))
+    print(yellow("Reminder: generate Code.gs from the panel (Deploy page) - it embeds"))
+    print(yellow("this key for you. A hand-edited AUTH_KEY that differs returns 'unauthorized'."))
     return 0
 
 

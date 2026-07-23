@@ -195,6 +195,29 @@ def generate_auth_key(length: int = 40) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def ensure_auth_key(config: dict) -> bool:
+    """Give *config* a usable auth_key, inventing one if it has none.
+
+    The key is a shared secret between this relay and the deployed Code.gs —
+    it has to match on both sides, but nothing about it is a decision the
+    operator can usefully make. Asking them to generate and copy one only
+    created a step to get wrong: a placeholder left in place, a short key, or
+    a mismatch after regenerating on one side. The panel now mints a random
+    40-character key the moment one is needed and writes it into the Code.gs
+    it hands over, so the two sides always agree and the operator never sees
+    it.
+
+    Returns True when the config was changed and should be saved. An existing
+    key is never rotated — doing so would silently break the Apps Script that
+    is already deployed with the old one.
+    """
+    current = str(config.get("auth_key") or "")
+    if current in PLACEHOLDER_AUTH_KEYS or len(current) < MIN_AUTH_KEY_LENGTH:
+        config["auth_key"] = generate_auth_key()
+        return True
+    return False
+
+
 # ── build ─────────────────────────────────────────────────────────────
 
 
