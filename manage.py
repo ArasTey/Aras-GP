@@ -32,7 +32,9 @@ import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import time
+import webbrowser
 from pathlib import Path
 
 # ── layout ─────────────────────────────────────────────────────────────
@@ -50,7 +52,9 @@ LOG_FILE = DATA_DIR / "panel.log"
 STATE_FILE = DATA_DIR / "manage.json"       # port/host/autostart the manager owns
 PANEL_JSON = DATA_DIR / "panel.json"        # admin hash, secret key, panel state
 CONFIG_JSON = ROOT / "config.json"
+CA_DIR = ROOT / "ca"
 REQUIREMENTS = ROOT / "requirements.txt"
+BACKUP_DIR = ROOT / "backups"
 
 DEFAULT_PORT = 8600
 DEFAULT_HOST = "127.0.0.1"
@@ -646,6 +650,219 @@ def _install_global_command() -> None:
                  "با ./aras.sh اجرا کنید."))
 
 
+# ── backup / export / import / reset ───────────────────────────────────
+# Everything that a re-clone destroys and cannot be regenerated: the relay
+# config, the panel state (password, saved Cloudflare token, relays, friends),
+# and the CA the browser trusts. One archive captures all three.
+def _backup_map() -> list[tuple[Path, str]]:
+    return [
+        (CONFIG_JSON, "config.json"),
+        (DATA_DIR, "panel-data"),
+        (CA_DIR, "ca"),
+    ]
+
+
+def create_backup(dest_dir: Path | None = None) -> tuple[Path, int]:
+    dest = Path(dest_dir) if dest_dir else BACKUP_DIR
+    dest.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    path = dest / f"aras-backup-{stamp}.tar.gz"
+    added = 0
+    with tarfile.open(path, "w:gz") as tar:
+        for src, arc in _backup_map():
+            if src.exists():
+                tar.add(str(src), arcname=arc)
+                added += 1
+    _chmod_600(path)
+    return path, added
+
+
+def _restore_target(name: str) -> Path | None:
+    """Map an archive member to where it belongs, or None to skip.
+
+    Membership is decided by fixed top-level names, and anything absolute or
+    containing ``..`` is refused — a backup is normally self-made, but a
+    restore must never write outside the project even if the file was tampered
+    with."""
+    name = name.replace("\\", "/").strip("/")
+    if not name or ".." in name.split("/"):
+        return None
+    if name == "config.json":
+        return CONFIG_JSON
+    if name == "panel-data" or name.startswith("panel-data/"):
+        rel = name[len("panel-data"):].strip("/")
+        return DATA_DIR / rel if rel else DATA_DIR
+    if name == "ca" or name.startswith("ca/"):
+        rel = name[len("ca"):].strip("/")
+        return CA_DIR / rel if rel else CA_DIR
+    return None
+
+
+def restore_backup(path: Path) -> int:
+    restored = 0
+    with tarfile.open(str(path), "r:gz") as tar:
+        for member in tar.getmembers():
+            target = _restore_target(member.name)
+            if target is None:
+                continue
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    continue
+                with extracted, open(target, "wb") as out:
+                    shutil.copyfileobj(extracted, out)
+                if target.name in ("ca.key", "panel.json", "config.json"):
+                    _chmod_600(target)
+                restored += 1
+    return restored
+
+
+def list_backups() -> list[Path]:
+    if not BACKUP_DIR.exists():
+        return []
+    return sorted(BACKUP_DIR.glob("aras-backup-*.tar.gz"), reverse=True)
+
+
+def action_backup() -> None:
+    _header("پشتیبان‌گیری")
+    try:
+        path, n = create_backup()
+    except OSError as exc:
+        print(red(f"  پشتیبان‌گیری ناموفق بود: {exc}"))
+        return
+    size = path.stat().st_size
+    print(green(f"  پشتیبان ساخته شد ({n} بخش، {size // 1024} کیلوبایت):"))
+    print("   " + str(path))
+    print(yellow("  این فایل رمز و کلید دارد — جای امن نگه دارید (دسترسی ۰۶۰۰)."))
+    print(dim("  برای بردن به سرور دیگر: از گزینه‌ی «خروجی» یا مستقیم scp کنید."))
+
+
+def action_export() -> None:
+    _header("خروجی گرفتن به مسیر دلخواه")
+    raw = _ask("پوشه‌ی مقصد (خالی = پوشه‌ی خانه)").strip()
+    dest = Path(os.path.expanduser(raw)) if raw else Path.home()
+    if not dest.is_dir():
+        print(red(f"  پوشه پیدا نشد: {dest}"))
+        return
+    try:
+        path, n = create_backup(dest)
+    except OSError as exc:
+        print(red(f"  ناموفق: {exc}"))
+        return
+    print(green(f"  خروجی ذخیره شد: {path}"))
+
+
+def action_import() -> None:
+    _header("بازگردانی از پشتیبان")
+    backups = list_backups()
+    chosen: Path | None = None
+    if backups:
+        print("  پشتیبان‌های موجود:")
+        for i, b in enumerate(backups[:10], 1):
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(b.stat().st_mtime))
+            print(f"   {i}. {b.name}  ({when})")
+        pick = _ask("شماره‌ی پشتیبان، یا مسیر فایل (خالی = انصراف)").strip()
+        if not pick:
+            return
+        if pick.isdigit() and 1 <= int(pick) <= len(backups[:10]):
+            chosen = backups[int(pick) - 1]
+        else:
+            chosen = Path(os.path.expanduser(pick))
+    else:
+        pick = _ask("مسیر فایل پشتیبان (.tar.gz)").strip()
+        if not pick:
+            return
+        chosen = Path(os.path.expanduser(pick))
+
+    if not chosen or not chosen.exists():
+        print(red("  فایل پشتیبان پیدا نشد."))
+        return
+    print(yellow(f"  «{chosen.name}» روی داده‌های فعلی بازنویسی می‌شود."))
+    if not _confirm("ادامه؟", default=False):
+        return
+    was_running = is_running()
+    if was_running:
+        stop_panel(quiet=True)
+    try:
+        n = restore_backup(chosen)
+    except (OSError, tarfile.TarError) as exc:
+        print(red(f"  بازگردانی ناموفق بود: {exc}"))
+        return
+    print(green(f"  بازگردانی شد ({n} فایل)."))
+    if was_running and _confirm("پنل دوباره راه‌اندازی شود؟", default=True):
+        start_panel()
+
+
+def action_reset() -> None:
+    _header("بازنشانی به حالت اولیه")
+    print(red("  این کار رمز پنل، توکن کلودفلر، رله‌ها و دوستان ذخیره‌شده را پاک می‌کند."))
+    print(dim("  گواهی CA و فایل‌های سورس دست نمی‌خورند."))
+    if not _confirm("مطمئنید؟ (پیشنهاد: اول یک پشتیبان بگیرید)", default=False):
+        return
+    if is_running():
+        stop_panel(quiet=True)
+    try:
+        if PANEL_JSON.exists():
+            PANEL_JSON.unlink()
+        profiles = DATA_DIR / "profiles"
+        if profiles.is_dir():
+            shutil.rmtree(profiles, ignore_errors=True)
+        if _confirm("کانفیگ رله (config.json) هم پاک شود؟", default=False):
+            CONFIG_JSON.unlink(missing_ok=True)
+    except OSError as exc:
+        print(red(f"  خطا: {exc}"))
+        return
+    print(green("  بازنشانی شد. دفعه‌ی بعد پنل مرحله‌ی راه‌اندازی اولیه را نشان می‌دهد."))
+
+
+# ── panel host (LAN access) ────────────────────────────────────────────
+def action_toggle_lan() -> None:
+    _header("دسترسی از شبکه (LAN)")
+    host = panel_host()
+    on_lan = host not in ("127.0.0.1", "localhost", "::1")
+    if on_lan:
+        print(f"  الان پنل روی {bold(host)} است (از شبکه در دسترس).")
+        if _confirm("برگردد به فقط همین دستگاه (127.0.0.1)؟", default=True):
+            _set_host("127.0.0.1")
+        return
+    print("  الان پنل فقط روی همین دستگاه است (127.0.0.1).")
+    print(yellow("  هشدار: باز کردن روی شبکه یعنی هر کسی در همان شبکه می‌تواند به"))
+    print(yellow("  پنل برسد. پنل رمز و توکن کلودفلر دارد — رمز قوی حتماً بگذارید."))
+    if _confirm("روی کل شبکه باز شود (برای دسترسی از گوشی)؟", default=False):
+        _set_host("0.0.0.0")
+        print(dim(f"  از گوشی: http://<IP این دستگاه>:{panel_port()}"))
+
+
+def _set_host(host: str) -> None:
+    state = load_state()
+    state["host"] = host
+    save_state(state)
+    print(green(f"  تنظیم شد: {host}"))
+    if is_running() and _confirm("برای اعمال، پنل ری‌استارت شود؟", default=True):
+        stop_panel(quiet=True)
+        start_panel()
+    if _autostart_installed():
+        _enable_autostart(quiet=True)
+
+
+def action_open_browser() -> None:
+    _header("باز کردن پنل در مرورگر")
+    url = f"http://{('127.0.0.1' if panel_host() in ('0.0.0.0', '::') else panel_host())}:{panel_port()}"
+    if not is_running():
+        print(yellow("  پنل خاموش است؛ اول روشنش کنید (گزینه‌ی ۵)."))
+    print("  " + bold(url))
+    try:
+        if webbrowser.open(url):
+            print(green("  در مرورگر باز شد."))
+        else:
+            print(dim("  مرورگری پیدا نشد (سرور بدون گرافیک؟) — آدرس بالا را باز کنید."))
+    except Exception:
+        print(dim("  نشد به‌صورت خودکار باز شود — آدرس بالا را دستی باز کنید."))
+
+
 # ── input helpers ──────────────────────────────────────────────────────
 def _ask(prompt: str) -> str:
     try:
@@ -722,43 +939,35 @@ def _display_width(s: str) -> int:
     return width
 
 
-def draw_menu() -> None:
-    running = is_running()
-    v = read_version()
-    state_txt = green("در حال اجرا") if running else red("متوقف")
-    auto_txt = green("بله") if _autostart_installed() else "خیر"
-
-    top = "╔" + "─" * _W + "╗"
-    bot = "╚" + "─" * _W + "╝"
-    print()
-    print(blue(top))
-    print(blue(_row(bold("Aras-GP  —  مدیریت پنل"))))
-    print(blue(_row(dim(f"نسخه {v}"))))
-    print(blue(_line()))
-    print(blue(_row("0. خروج")))
-    print(blue(_line()))
-    print(blue(_row("1. نصب")))
-    print(blue(_row("2. به‌روزرسانی")))
-    print(blue(_row("3. استفاده از نسخه‌ی مشخص (قدیمی)")))
-    print(blue(_row("4. حذف")))
-    print(blue(_line()))
-    print(blue(_row("5. روشن‌کردن")))
-    print(blue(_row("6. خاموش‌کردن")))
-    print(blue(_row("7. ری‌استارت")))
-    print(blue(_row("8. وضعیت")))
-    print(blue(_row("9. لاگ‌ها")))
-    print(blue(_line()))
-    print(blue(_row("10. تغییر پورت پنل")))
-    print(blue(_row("11. تغییر رمز پنل")))
-    print(blue(_row("12. مشاهده‌ی تنظیمات")))
-    print(blue(_line()))
-    print(blue(_row("13. روشن‌کردن اتواستارت")))
-    print(blue(_row("14. خاموش‌کردن اتواستارت")))
-    print(blue(bot))
-    print(f"  وضعیت پنل   : {state_txt}"
-          + (dim(f"   http://{panel_host()}:{panel_port()}") if running else ""))
-    print(f"  اتواستارت   : {auto_txt}")
-
+# Data-driven so the box, the numbering and the dispatch table can never drift
+# apart: one list is the whole menu. "—" is a section rule.
+MENU: list = [
+    ("1", "نصب"),
+    ("2", "به‌روزرسانی"),
+    ("3", "استفاده از نسخه‌ی مشخص (قدیمی)"),
+    ("4", "حذف"),
+    "—",
+    ("5", "روشن‌کردن"),
+    ("6", "خاموش‌کردن"),
+    ("7", "ری‌استارت"),
+    ("8", "وضعیت"),
+    ("9", "لاگ‌ها"),
+    "—",
+    ("10", "تغییر پورت پنل"),
+    ("11", "تغییر رمز پنل"),
+    ("12", "دسترسی از شبکه (LAN)"),
+    ("13", "مشاهده‌ی تنظیمات"),
+    "—",
+    ("14", "پشتیبان‌گیری"),
+    ("15", "خروجی گرفتن به مسیر دلخواه"),
+    ("16", "بازگردانی از پشتیبان"),
+    ("17", "بازنشانی به حالت اولیه"),
+    "—",
+    ("18", "روشن‌کردن اتواستارت"),
+    ("19", "خاموش‌کردن اتواستارت"),
+    "—",
+    ("20", "باز کردن پنل در مرورگر"),
+]
 
 ACTIONS = {
     "1": action_install,
@@ -772,17 +981,49 @@ ACTIONS = {
     "9": action_logs,
     "10": action_change_port,
     "11": action_change_password,
-    "12": action_view_settings,
-    "13": action_enable_autostart,
-    "14": action_disable_autostart,
+    "12": action_toggle_lan,
+    "13": action_view_settings,
+    "14": action_backup,
+    "15": action_export,
+    "16": action_import,
+    "17": action_reset,
+    "18": action_enable_autostart,
+    "19": action_disable_autostart,
+    "20": action_open_browser,
 }
+
+_MAX_CHOICE = max(int(k) for k in ACTIONS)
+
+
+def draw_menu() -> None:
+    running = is_running()
+    v = read_version()
+    state_txt = green("در حال اجرا") if running else red("متوقف")
+    auto_txt = green("بله") if _autostart_installed() else "خیر"
+
+    print()
+    print(blue("╔" + "─" * _W + "╗"))
+    print(blue(_row(bold("Aras-GP  —  مدیریت پنل") + dim(f"   v{v}"))))
+    print(blue(_line()))
+    print(blue(_row("0. خروج")))
+    print(blue(_line()))
+    for item in MENU:
+        if item == "—":
+            print(blue(_line()))
+        else:
+            num, label = item
+            print(blue(_row(f"{num}. {label}")))
+    print(blue("╚" + "─" * _W + "╝"))
+    url = f"http://{panel_host()}:{panel_port()}"
+    print(f"  وضعیت پنل   : {state_txt}" + (dim("   " + url) if running else ""))
+    print(f"  اتواستارت   : {auto_txt}")
 
 
 def menu_loop() -> None:
     while True:
         draw_menu()
         try:
-            choice = input(blue("  » ") + "انتخاب کنید [0-14]: ").strip()
+            choice = input(blue("  » ") + f"انتخاب کنید [0-{_MAX_CHOICE}]: ").strip()
         except (EOFError, KeyboardInterrupt):
             # A closed or piped-empty stdin must end the menu, not spin on it.
             print()
