@@ -30,7 +30,10 @@ from urllib.parse import quote, urlparse
 
 from . import store
 
-NAME_RE = re.compile(r"^[\w .\-()آ-یءؤئ]{1,40}$", re.UNICODE)
+#: Friend names are labels, not identifiers — they end up in the link fragment
+#: and nowhere else. Persian writes half-spaces (U+200C) inside ordinary words
+#: like «لپ‌تاپ», so rejecting that character rejects normal names.
+NAME_RE = re.compile(r"^[\w .\-()‌‏آ-یءؤئٔ]{1,40}$", re.UNICODE)
 
 #: Default VLESS WebSocket path if the operator has not chosen one.
 DEFAULT_PATH = "/aras"
