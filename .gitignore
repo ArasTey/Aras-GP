@@ -46,3 +46,6 @@ panel/data/panel.log
 
 # A clone accidentally made inside the repo itself
 /Aras-GP/
+
+# Local backups — contain the auth key, CA private key and Cloudflare token.
+backups/
