@@ -54,7 +54,7 @@
   <div>
     هنوز <span class="ar-mono ar-ltr">config.json</span> ساخته نشده است. مقادیر زیر از
     <span class="ar-mono ar-ltr">config.example.json</span> پیش‌پر شده‌اند؛ فقط
-    <b>auth_key</b> و <b>Deployment ID</b> را پر کنید و ذخیره بزنید.
+    <b>Deployment ID</b> را پر کنید و ذخیره بزنید (کلید احراز هویت خودکار است).
   </div>
 </div>
 {% endif %}
@@ -70,20 +70,15 @@
 
     <div class="ar-grid ar-grid--2">
       <div class="ar-field">
-        <label class="ar-label" for="auth_key">{{ icon('key', 15) }} کلید احراز هویت (auth_key)</label>
-        <div class="ar-input-group">
-          <input class="ar-input ar-mono" type="text" id="auth_key" name="auth_key" dir="ltr"
-                 value="{{ cfg.get('auth_key', '') }}" autocomplete="off" spellcheck="false">
-          <button class="ar-btn ar-btn--sm" id="gen-key" type="button" title="تولید کلید تصادفی">
-            {{ icon('refresh', 14) }}
-          </button>
-          <button class="ar-btn ar-btn--sm" data-copy="#auth_key" data-copy-label="کلید"
-                  type="button">{{ icon('copy', 14) }}</button>
+        <label class="ar-label">{{ icon('key', 15) }} کلید احراز هویت</label>
+        <div class="ar-note" style="margin:0">
+          {{ icon('check', 15) }}
+          <div>
+            <b>خودکار ساخته می‌شود.</b> این کلید فقط رمز مشترک بین رله‌ی شما و
+            Code.gs است و پنل خودش می‌سازد و داخل کدی که تولید می‌کند
+            می‌گذارد. لازم نیست ببینید، کپی کنید یا جایی وارد کنید.
+          </div>
         </div>
-        <span class="ar-hint">
-          این مقدار باید <b>دقیقاً</b> با ثابت <span class="ar-mono ar-ltr">AUTH_KEY</span>
-          داخل Code.gs یکی باشد. حداقل ۱۶ کاراکتر.
-        </span>
       </div>
 
       <div class="ar-field">
@@ -272,15 +267,6 @@
 {% block scripts %}
 <script nonce="{{ csp_nonce() }}">
 (function () {
-  Aras.action(document.getElementById("gen-key"), function () {
-    return Aras.post("/api/config/auth-key").then(function (data) {
-      if (!data.ok) { Aras.toast(data.error, "error"); return; }
-      document.getElementById("auth_key").value = data.auth_key;
-      Aras.toast("کلید جدید ساخته شد — یادتان باشد Code.gs را دوباره تولید کنید.",
-                 "warn", 7000);
-    });
-  });
-
   Aras.action(document.getElementById("profile-save"), function () {
     var name = document.getElementById("profile-name").value.trim();
     if (!name) { Aras.toast("نام پروفایل را وارد کنید.", "error"); return; }

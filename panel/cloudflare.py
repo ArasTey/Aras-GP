@@ -208,12 +208,43 @@ def enable_workers_dev(token: str, account_id: str, script_name: str) -> bool:
     return bool((payload.get("result") or {}).get("enabled", True))
 
 
+def resolve_account_id(token: str, account_id: str = "") -> str:
+    """Return the account to deploy into, asking Cloudflare when not told.
+
+    The ID is not something an operator should have to go and find: the token
+    already implies which accounts it can touch. When it selects exactly one —
+    the ordinary case — that is the answer. Only a token spanning several
+    accounts needs a decision, and then the caller is told which ones so it can
+    ask rather than guess.
+    """
+    account_id = (account_id or "").strip()
+    if re.fullmatch(r"[0-9a-fA-F]{32}", account_id):
+        return account_id
+    if account_id:
+        raise CloudflareError("Account ID باید یک رشته ۳۲ کاراکتری هگز باشد.")
+
+    accounts = list_accounts(token)
+    if not accounts:
+        raise CloudflareError(
+            "این توکن به هیچ حسابی دسترسی ندارد. موقع ساخت توکن، دسترسی "
+            "«Account Settings: Read» را هم بدهید."
+        )
+    if len(accounts) == 1:
+        log.info("Account ID resolved automatically: %s", accounts[0]["name"])
+        return accounts[0]["id"]
+
+    names = "، ".join(a["name"] for a in accounts[:5])
+    raise CloudflareError(
+        f"این توکن به {len(accounts)} حساب دسترسی دارد ({names}). "
+        "یکی را از فهرست انتخاب کنید.",
+        errors=[{"accounts": accounts}],
+    )
+
+
 def deploy(token: str, account_id: str, script_name: str,
            vless_uuids: list[str] | None = None) -> dict:
     """Full deploy. Returns the public worker URL and the steps that ran."""
-    account_id = (account_id or "").strip()
-    if not re.fullmatch(r"[0-9a-fA-F]{32}", account_id):
-        raise CloudflareError("Account ID باید یک رشته ۳۲ کاراکتری هگز باشد.")
+    account_id = resolve_account_id(token, account_id)
     script_name = validate_script_name(script_name)
 
     steps: list[dict] = []

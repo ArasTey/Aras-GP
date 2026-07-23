@@ -67,17 +67,16 @@
     </div>
 
     <div class="ar-field">
-      <label class="ar-label" for="cf-account">{{ icon('server', 15) }} Account ID</label>
-      <div class="ar-input-group">
-        <input class="ar-input ar-mono" type="text" id="cf-account" dir="ltr"
-               value="{{ cf.account_id }}" placeholder="۳۲ کاراکتر هگز">
-        <button class="ar-btn ar-btn--sm" id="cf-verify" type="button">
-          {{ icon('check', 14) }}<span>بررسی توکن</span>
-        </button>
+      <label class="ar-label">{{ icon('server', 15) }} حساب کلودفلر</label>
+      <div class="ar-note" style="margin:0">
+        {{ icon('check', 15) }}
+        <div id="cf-accounts-hint">
+          <b>خودکار پیدا می‌شود.</b> Account ID از روی خود توکن خوانده می‌شود؛
+          لازم نیست چیزی وارد کنید. فقط اگر توکن به چند حساب دسترسی داشته باشد
+          از شما پرسیده می‌شود.
+        </div>
       </div>
-      <span class="ar-hint" id="cf-accounts-hint">
-        اگر Account ID را نمی‌دانید، «بررسی توکن» را بزنید تا حساب‌های در دسترس فهرست شوند.
-      </span>
+      <input type="hidden" id="cf-account" value="{{ cf.account_id }}">
     </div>
 
     <div class="ar-field">
@@ -140,34 +139,6 @@
 
   <div class="ar-grid ar-grid--sidebar">
     <div>
-      <div class="ar-field" style="margin-bottom:var(--ar-s4)">
-        <label class="ar-label" for="gas-auth-key">{{ icon('key', 15) }} کلید احراز هویت (auth_key)</label>
-        <div class="ar-input-group">
-          <input class="ar-input ar-mono" type="text" id="gas-auth-key" dir="ltr"
-                 value="{{ auth_key }}" autocomplete="off" spellcheck="false"
-                 placeholder="هنوز ساخته نشده">
-          <button class="ar-btn ar-btn--sm" id="gas-key-gen" type="button"
-                  title="ساخت کلید تصادفی">{{ icon('refresh', 14) }}</button>
-          <button class="ar-btn ar-btn--sm" data-copy="#gas-auth-key" data-copy-label="کلید"
-                  type="button">{{ icon('copy', 14) }}</button>
-        </div>
-        <span class="ar-hint">
-          همین‌جا می‌توانید بسازید و ذخیره کنید — لازم نیست اول به صفحه‌ی
-          «ساخت کانفیگ» بروید. این مقدار باید <b>دقیقاً</b> با
-          <span class="ar-mono ar-ltr">AUTH_KEY</span> داخل Code.gs یکی باشد،
-          و تولید کد پایین خودش از همین استفاده می‌کند.
-        </span>
-      </div>
-
-      <div class="ar-field" style="margin-bottom:var(--ar-s4)">
-        <label class="ar-label" for="gas-worker-url">{{ icon('link', 15) }} آدرس Worker</label>
-        <input class="ar-input ar-mono" type="text" id="gas-worker-url" dir="ltr"
-               value="{{ cf.worker_url }}" placeholder="https://aras-relay.username.workers.dev">
-        <span class="ar-hint">
-          پس از دیپلوی مرحله‌ی ۱ خودکار پر می‌شود. اگر Worker را دستی از داشبورد
-          کلودفلر ساخته‌اید، آدرسش را همین‌جا وارد کنید.
-        </span>
-      </div>
 
       <div class="ar-row" style="margin-bottom:var(--ar-s3)">
         <button class="ar-btn ar-btn--accent" id="gas-generate" type="button">
@@ -176,9 +147,6 @@
         <button class="ar-btn ar-btn--sm" id="gas-copy" type="button" disabled>
           {{ icon('copy', 14) }}<span>کپی کد</span>
         </button>
-        {% if not auth_key_set %}
-          <span class="ar-pill ar-pill--bad">{{ icon('alert', 13) }} اول auth_key را بسازید</span>
-        {% endif %}
       </div>
 
       <div class="ar-code">
@@ -299,26 +267,25 @@
     cell.textContent = Aras.dateTime(cell.dataset.epoch);
   });
 
-  Aras.action(document.getElementById("cf-verify"), function () {
-    return Aras.post("/api/cloudflare/verify", { api_token: token.value }).then(function (data) {
-      if (!data.ok) { Aras.toast(data.error, "error", 7000); return; }
-      Aras.toast("توکن معتبر است (" + data.status + ").", "success");
-      var hint = document.getElementById("cf-accounts-hint");
-      if (data.accounts && data.accounts.length) {
-        hint.innerHTML = "حساب‌های در دسترس: " + data.accounts.map(function (acc) {
-          return '<a href="#" class="ar-mono ar-ltr" data-account="' + Aras.escape(acc.id) +
-                 '">' + Aras.escape(acc.name) + "</a>";
-        }).join(" ، ");
-        hint.querySelectorAll("[data-account]").forEach(function (link) {
-          link.addEventListener("click", function (event) {
-            event.preventDefault();
-            account.value = link.dataset.account;
-            Aras.toast("Account ID پر شد.", "info", 2500);
-          });
-        });
-      }
+  // A token that reaches several accounts is the only case needing a choice.
+  // Deploy reports them; show them as buttons and retry with the chosen one.
+  function offerAccounts(accounts) {
+    var hint = document.getElementById("cf-accounts-hint");
+    hint.innerHTML = "<b>کدام حساب؟</b> ";
+    accounts.forEach(function (acc) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ar-btn ar-btn--sm";
+      btn.style.margin = "4px 4px 0 0";
+      btn.textContent = acc.name;
+      btn.addEventListener("click", function () {
+        account.value = acc.id;
+        hint.innerHTML = "حساب انتخاب شد: <b>" + Aras.escape(acc.name) +
+                         "</b> — دوباره «دیپلوی Worker» را بزنید.";
+      });
+      hint.appendChild(btn);
     });
-  });
+  }
 
   Aras.action(document.getElementById("cf-deploy"), function () {
     result.innerHTML = "";
@@ -329,6 +296,11 @@
       remember_token: remember.checked ? "1" : ""
     }).then(function (data) {
       if (!data.ok) {
+        var choices = null;
+        (data.details || []).forEach(function (d) {
+          if (d && d.accounts) choices = d.accounts;
+        });
+        if (choices) offerAccounts(choices);
         Aras.toast(data.error, "error", 9000);
         result.innerHTML = '<div class="ar-note ar-note--bad">' +
           '<div>' + Aras.escape(data.error) + "</div></div>";
@@ -430,31 +402,6 @@
   var copyBtn = document.getElementById("gas-copy");
 
   var gasWorkerUrl = document.getElementById("gas-worker-url");
-  var gasAuthKey = document.getElementById("gas-auth-key");
-
-  Aras.action(document.getElementById("gas-key-gen"), function () {
-    return Aras.post("/api/config/auth-key", { save: "1" }).then(function (data) {
-      if (!data.ok) { Aras.toast(data.error, "error", 7000); return; }
-      gasAuthKey.value = data.auth_key;
-      Aras.toast(data.message || "کلید ساخته و ذخیره شد.", "warn", 8000);
-    });
-  });
-
-  // Typing a key by hand should persist too, otherwise Code.gs would be
-  // generated from a value that never reached config.json.
-  var keyTimer = null;
-  gasAuthKey.addEventListener("input", function () {
-    clearTimeout(keyTimer);
-    keyTimer = setTimeout(function () {
-      var value = gasAuthKey.value.trim();
-      if (value.length < 16) return;
-      Aras.post("/api/config/auth-key", { auth_key: value, save: "1" })
-        .then(function (data) {
-          if (!data.ok) Aras.toast(data.error, "error", 6000);
-        });
-    }, 900);
-  });
-
   Aras.action(document.getElementById("gas-generate"), function () {
     // Prefer a URL just deployed in this session, then the saved one, then
     // whatever the operator typed by hand.
@@ -462,8 +409,7 @@
     var workerUrl = (deployed || gasWorkerUrl.value || "").trim();
     gasWorkerUrl.value = workerUrl;
     return Aras.post("/api/gas/code", {
-      worker_url: workerUrl,
-      auth_key: gasAuthKey.value.trim()
+      worker_url: workerUrl
     }).then(function (data) {
       if (!data.ok) { Aras.toast(data.error, "error", 8000); return; }
       codeBox.textContent = data.code;
