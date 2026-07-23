@@ -148,6 +148,16 @@ flowchart LR
 
 ### 🐧 لینوکس
 
+**ساده‌ترین راه (یک دستور):**
+
+```bash
+git clone https://github.com/ArasTey/Aras-GP.git
+cd Aras-GP
+./run.sh panel          # venv می‌سازد، وابستگی‌ها را نصب می‌کند، پنل را بالا می‌آورد
+```
+
+**یا دستی:**
+
 ```bash
 # ۱. کلون
 git clone https://github.com/ArasTey/Aras-GP.git
@@ -158,7 +168,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # ۳. وابستگی‌ها
-pip install -r requirements.txt -r panel/requirements.txt
+pip install -r requirements.txt
 
 # ۴. اجرا
 python -m panel
@@ -178,7 +188,7 @@ cd Aras-GP
 
 python3 -m venv .venv          # ⚠️ روی مک حتماً python3، نه python
 source .venv/bin/activate
-pip install -r requirements.txt -r panel/requirements.txt
+pip install -r requirements.txt
 
 python -m panel
 ```
@@ -189,13 +199,23 @@ python -m panel
 
 ### 🪟 ویندوز
 
+**ساده‌ترین راه (یک دستور):**
+
+```bat
+git clone https://github.com/ArasTey/Aras-GP.git
+cd Aras-GP
+run.bat panel
+```
+
+**یا دستی:**
+
 ```powershell
 git clone https://github.com/ArasTey/Aras-GP.git
 cd Aras-GP
 
 py -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt -r panel\requirements.txt
+pip install -r requirements.txt
 
 python -m panel
 ```
@@ -799,6 +819,9 @@ curl -b c.txt http://127.0.0.1:8600/api/stats | python3 -m json.tool
 | `Address already in use` | نمونه‌ی دیگری در حال اجراست | `./scripts/aras-panel.sh stop` یا پورت را عوض کنید |
 | رمز پنل فراموش شده | — | `panel/data/panel.json` را پاک کنید؛ کانفیگ و کاربران می‌مانند |
 | `zsh: command not found: python` | روی مک `python` وجود ندارد | `python3` بزنید یا venv را فعال کنید |
+| `ModuleNotFoundError: No module named 'flask'` | با پایتون سیستمی اجرا شده، نه venv پروژه؛ یا وابستگی‌ها نصب نشده‌اند | `run.bat panel` (ویندوز) یا `./run.sh panel` — خودش venv می‌سازد و همه‌چیز را نصب می‌کند. دستی: `pip install -r requirements.txt`. حالا خود برنامه هم دقیقاً همین را می‌گوید و دیگر traceback خام نمی‌دهد |
+| روی ویندوز پنل بی‌صدا بالا نمی‌آید | `aras-panel.ps1` به پایتون سیستمی افتاده که Flask ندارد | اول `run.bat` را اجرا کنید تا `.venv` ساخته شود؛ اسکریپت حالا اول سراغ venv می‌رود و اگر مجبور شد از پایتون سیستمی استفاده کند هشدار می‌دهد |
+| خطای `UnicodeEncodeError` در لاگ ویندوز | خروجی به فایل ریدایرکت شده و code page ویندوز فارسی را نمی‌پذیرد | برطرف شد — هر دو ورودی برنامه، stdout/stderr را روی UTF-8 تنظیم می‌کنند |
 | SOCKS5 بالا نمی‌آید ولی HTTP کار می‌کند | پورت ۱۰۸۰ اشغال است | پنل در صفحه‌ی وضعیت هشدار می‌دهد؛ پورت را عوض کنید |
 | کاربر با رمز درست وصل نمی‌شود | سهمیه تمام شده یا تاریخ انقضا گذشته | صفحه‌ی کاربران → ستون وضعیت |
 
@@ -985,7 +1008,7 @@ chokepoint it exists to avoid.
 ```bash
 git clone https://github.com/ArasTey/Aras-GP.git && cd Aras-GP
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r panel/requirements.txt
+pip install -r requirements.txt
 python -m panel          # → http://127.0.0.1:8600
 ```
 

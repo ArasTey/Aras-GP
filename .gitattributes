@@ -1,0 +1,18 @@
+# Keep line endings correct on every platform, whatever the contributor's
+# core.autocrlf happens to be set to.
+*           text=auto
+
+# cmd.exe parses batch files line by line and mishandles LF-only blocks;
+# PowerShell is happiest with CRLF too. Both must arrive that way on checkout.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Shell scripts must stay LF or the shebang line carries a stray \r and the
+# kernel reports "bad interpreter".
+*.sh        text eol=lf
+
+# Certificates and binaries are never touched.
+*.crt       binary
+*.key       binary
+*.png       binary

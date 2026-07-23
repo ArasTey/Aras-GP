@@ -24,15 +24,24 @@ $RunDir  = Join-Path $Root "panel\data"
 $PidFile = Join-Path $RunDir "panel.pid"
 $LogFile = Join-Path $RunDir "panel.log"
 
-$VenvPy = Join-Path $Root ".venv\Scripts\pythonw.exe"
-if (Test-Path $VenvPy) {
+# The virtualenv is where the dependencies are. Falling straight through to a
+# system-wide interpreter, as this used to, starts a panel that cannot import
+# Flask — and because it is launched hidden, the only evidence is a log file
+# nobody thinks to open. Exhaust the venv first, and say so when we cannot.
+$VenvW  = Join-Path $Root ".venv\Scripts\pythonw.exe"
+$VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
+if (Test-Path $VenvW) {
+    $Py = $VenvW
+} elseif (Test-Path $VenvPy) {
     $Py = $VenvPy
 } elseif (Get-Command pythonw -ErrorAction SilentlyContinue) {
     $Py = (Get-Command pythonw).Source
+    Write-Warning "از پایتون سیستمی استفاده می‌شود؛ اگر پنل بالا نیامد اول run.bat را اجرا کنید تا .venv ساخته شود."
 } elseif (Get-Command python -ErrorAction SilentlyContinue) {
     $Py = (Get-Command python).Source
+    Write-Warning "از پایتون سیستمی استفاده می‌شود؛ اگر پنل بالا نیامد اول run.bat را اجرا کنید تا .venv ساخته شود."
 } else {
-    Write-Error "پایتون پیدا نشد. اول venv بسازید:  py -m venv .venv"
+    Write-Error "پایتون پیدا نشد. اول run.bat را اجرا کنید (یا: py -m venv .venv)"
     exit 1
 }
 

@@ -20,7 +20,15 @@ _ENGINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine")
 if _ENGINE_DIR not in sys.path:
     sys.path.insert(0, _ENGINE_DIR)
 
-from cert_installer import (
+from bootstrap import ensure_utf8_stdio, require_modules
+
+ensure_utf8_stdio()
+# cryptography is not optional in Apps Script mode — it mints every leaf
+# certificate — and the failure without it used to be an ImportError three
+# modules deep, long after the banner had printed.
+require_modules("cryptography")
+
+from cert_installer import (   # noqa: E402  (must follow the dependency check)
     install_ca, is_ca_trusted, remove_stale_cas, stale_macos_cas, uninstall_ca,
 )
 from constants import __version__

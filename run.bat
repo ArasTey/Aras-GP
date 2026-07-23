@@ -2,10 +2,14 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-REM -------- MasterHttpRelayVPN one-click launcher (Windows) --------
-REM Creates a local virtualenv, installs deps, runs the setup wizard
-REM if needed, then starts the proxy. Also checks and installs CA cert
-REM if not already trusted.
+REM -------- Aras-GP one-click launcher (Windows) --------
+REM
+REM   run.bat              start the relay engine
+REM   run.bat panel        start the control panel  (http://127.0.0.1:8600)
+REM   run.bat <args...>    any main.py flag, e.g. --install-cert, --scan
+REM
+REM Creates a local virtualenv, installs every dependency, runs the setup
+REM wizard if there is no config yet, then starts what you asked for.
 
 set "VENV_DIR=.venv"
 set "PY="
@@ -22,7 +26,8 @@ if !errorlevel!==0 (
 
 if "%PY%"=="" (
     echo [X] Python 3.10+ was not found on PATH.
-    echo     Install from https://www.python.org/downloads/ and re-run this script.
+    echo     Install it from https://www.python.org/downloads/ and tick
+    echo     "Add python.exe to PATH" in the installer, then re-run this script.
     pause
     exit /b 1
 )
@@ -39,37 +44,50 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 
 set "VPY=%VENV_DIR%\Scripts\python.exe"
 
+REM requirements.txt now covers the panel as well as the engine. It did not,
+REM and a virtualenv built here came out without Flask in it, so this script
+REM reported success and "python -m panel" then failed on an import error.
 echo [*] Installing dependencies ...
 "%VPY%" -m pip install --disable-pip-version-check -q --upgrade pip >nul
 "%VPY%" -m pip install --disable-pip-version-check -q -r requirements.txt
 if errorlevel 1 (
-    echo [!] PyPI install failed. Retrying via runflare mirror ...
-    "%VPY%" -m pip install --disable-pip-version-check -q -r requirements.txt
-    if errorlevel 1 (
-        echo [X] Could not install dependencies.
-        pause
-        exit /b 1
+    echo [X] Could not install dependencies. Check your network and retry.
+    pause
+    exit /b 1
+)
+
+REM -------- Panel --------
+if /i "%~1"=="panel" (
+    echo.
+    if defined ARAS_PANEL_PORT (
+        echo [*] Starting the Aras-GP panel  --^> http://127.0.0.1:!ARAS_PANEL_PORT!
+    ) else (
+        echo [*] Starting the Aras-GP panel  --^> http://127.0.0.1:8600
+    )
+    echo.
+    "%VPY%" -m panel
+    set "RC=!errorlevel!"
+    if not "!RC!"=="0" pause
+    exit /b !RC!
+)
+
+REM Certificate commands run standalone in main.py, so they must not be
+REM ambushed by the setup wizard when there is no config yet.
+set "CERTONLY="
+echo %* | findstr /C:"-cert" >nul
+if not errorlevel 1 set "CERTONLY=1"
+
+if not defined CERTONLY (
+    if not exist "config.json" (
+        echo [*] No config.json found - launching setup wizard ...
+        "%VPY%" setup.py
+        if errorlevel 1 (
+            echo [X] Setup cancelled.
+            pause
+            exit /b 1
+        )
     )
 )
-
-if not exist "config.json" (
-    echo [*] No config.json found — launching setup wizard ...
-    "%VPY%" setup.py
-    if errorlevel 1 (
-        echo [X] Setup cancelled.
-        pause
-        exit /b 1
-    )
-)
-
-REM -------- Check for uninstall flag --------
-echo %* | findstr /C:"--uninstall-cert" >nul
-if not errorlevel 1 (
-    echo [*] Uninstalling CA certificate ...
-    "%VPY%" main.py --uninstall-cert
-    exit /b %errorlevel%
-)
-
 
 echo.
 echo [*] Starting Aras-GP ...
