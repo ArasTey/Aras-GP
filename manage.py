@@ -13,8 +13,12 @@ launching `.venv/bin/python -m panel` as a detached process and tracking it
 with a PID file, exactly as the shell runners did, plus a real listening-port
 check so "Running" means the panel actually answers.
 
-Run it with `python3 manage.py`, or through the `aras.sh` / `aras.bat` wrappers,
-or — after Install offers it — the global `aras` command.
+Run it with `python3 manage.py`, or through the `agp.sh` / `agp.bat` wrappers,
+or — after Install offers it — the global `agp` command (just type `agp`).
+
+The menu is intentionally in English: the panel's web UI is Persian, but a
+terminal box drawn around right-to-left text reorders and looks broken in most
+shells, so the manager keeps its labels ASCII and aligned.
 """
 
 from __future__ import annotations
@@ -211,11 +215,11 @@ def is_running() -> bool:
 
 def start_panel(quiet: bool = False) -> bool:
     if not venv_ready():
-        print(red("  محیط نصب نشده — اول گزینه‌ی «نصب» (۱) را بزنید."))
+        print(red("  Not installed yet — run Install (1) first."))
         return False
     if is_running():
         if not quiet:
-            print(yellow("  پنل از قبل در حال اجراست."))
+            print(yellow("  Panel is already running."))
         return True
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -246,13 +250,13 @@ def start_panel(quiet: bool = False) -> bool:
     for _ in range(20):
         if _port_open(panel_host(), panel_port(), 0.4):
             if not quiet:
-                print(green(f"  پنل بالا آمد → http://{panel_host()}:{panel_port()}"))
+                print(green(f"  Panel is up  ->  http://{panel_host()}:{panel_port()}"))
             return True
         if proc.poll() is not None:
             break
         time.sleep(0.5)
 
-    print(red("  پنل بالا نیامد. آخرین خطوط لاگ:"))
+    print(red("  Panel failed to start. Last log lines:"))
     _tail(LOG_FILE, 20)
     return False
 
@@ -261,7 +265,7 @@ def stop_panel(quiet: bool = False) -> bool:
     pid = _read_pid()
     if not _pid_alive(pid) and not is_running():
         if not quiet:
-            print(yellow("  پنل در حال اجرا نیست."))
+            print(yellow("  Panel is not running."))
         PID_FILE.unlink(missing_ok=True)
         return True
     if IS_WINDOWS:
@@ -283,7 +287,7 @@ def stop_panel(quiet: bool = False) -> bool:
                 pass
     PID_FILE.unlink(missing_ok=True)
     if not quiet:
-        print(green("  پنل متوقف شد."))
+        print(green("  Panel stopped."))
     return True
 
 
@@ -291,7 +295,7 @@ def _tail(path: Path, n: int) -> None:
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
-        print(dim("  لاگی موجود نیست."))
+        print(dim("  No log yet."))
         return
     for line in lines[-n:]:
         print("   " + line)
@@ -303,7 +307,7 @@ def _run(cmd: list[str], **kw) -> int:
     try:
         return subprocess.call(cmd, cwd=str(ROOT), **kw)
     except FileNotFoundError as exc:
-        print(red(f"  دستور پیدا نشد: {exc}"))
+        print(red(f"  Command not found: {exc}"))
         return 127
 
 
@@ -311,109 +315,111 @@ def install_deps() -> bool:
     if not venv_ready():
         py = find_system_python()
         if not py:
-            print(red("  پایتون ۳٫۱۰ به بالا پیدا نشد. اول نصبش کنید."))
+            print(red("  Python 3.10+ not found. Install it first."))
             return False
-        print(blue("  ساخت محیط مجازی (.venv)…"))
+        print(blue("  Creating the virtualenv (.venv)..."))
         if _run([py, "-m", "venv", str(VENV_DIR)]) != 0:
-            print(red("  ساخت venv ناموفق بود."))
+            print(red("  Failed to create the virtualenv."))
             return False
-    print(blue("  نصب/به‌روزرسانی وابستگی‌ها…"))
+    print(blue("  Installing / updating dependencies..."))
     _run([str(VENV_PY), "-m", "pip", "install", "--disable-pip-version-check",
           "-q", "--upgrade", "pip"])
     rc = _run([str(VENV_PY), "-m", "pip", "install", "--disable-pip-version-check",
                "-q", "-r", str(REQUIREMENTS)])
     if rc != 0:
-        print(red("  نصب وابستگی‌ها ناموفق بود. اینترنت/فیلترینگ را بررسی کنید."))
+        print(red("  Dependency install failed. Check your connection."))
         return False
-    print(green("  آماده شد."))
+    print(green("  Ready."))
     return True
 
 
 def action_install() -> None:
-    _header("نصب")
+    _header("Install")
     if venv_ready():
-        print(yellow("  محیط از قبل وجود دارد؛ فقط وابستگی‌ها به‌روز می‌شوند."))
+        print(yellow("  Environment already exists; just updating dependencies."))
     if not install_deps():
         return
-    if _confirm("پنل همین حالا روشن شود؟", default=True):
-        start_panel()
-    if not IS_WINDOWS and _confirm("دستور سراسری «aras» ساخته شود تا از هرجا اجرا شود؟",
-                                   default=True):
+    # Create the global command right away, without asking — the whole point
+    # of the manager is to be reachable as `agp` from anywhere; asking every
+    # time only adds a step to the setup people actually want.
+    if not IS_WINDOWS:
         _install_global_command()
+    if _confirm("Start the panel now?", default=True):
+        start_panel()
 
 
 def action_update() -> None:
-    _header("به‌روزرسانی")
+    _header("Update")
     was_running = is_running()
     if have_git():
-        print(blue("  گرفتن آخرین نسخه از گیت‌هاب…"))
+        print(blue("  Pulling the latest version from GitHub..."))
         _run(["git", "fetch", "--tags", "--quiet"])
         if _run(["git", "pull", "--ff-only"]) != 0:
-            print(yellow("  pull با fast-forward نشد — شاید تغییرات محلی دارید."))
-            print(yellow("  دستی حلش کنید یا از «نسخه‌ی مشخص» استفاده کنید."))
+            print(yellow("  Fast-forward pull failed — you may have local changes."))
+            print(yellow("  Resolve it by hand, or use 'Specific version' instead."))
     else:
-        print(yellow("  گیت روی این پوشه فعال نیست. برای آپدیت، دوباره کلون/دانلود کنید."))
+        print(yellow("  Git is not active here. To update, clone/download again."))
         return
     install_deps()
-    print(green(f"  اکنون روی نسخه‌ی {read_version()} هستید."))
-    if was_running and _confirm("پنل دوباره راه‌اندازی شود؟", default=True):
+    print(green(f"  You are now on version {read_version()}."))
+    if was_running and _confirm("Restart the panel?", default=True):
         stop_panel(quiet=True)
         start_panel()
 
 
 def action_legacy_version() -> None:
-    _header("استفاده از نسخه‌ی مشخص")
+    _header("Use a specific version")
     if not have_git():
-        print(yellow("  برای این کار گیت لازم است (کلون گیت، نه دانلود zip)."))
+        print(yellow("  This needs git (a git clone, not a zip download)."))
         return
     tags = subprocess.run(["git", "tag", "--sort=-v:refname"],
                           cwd=str(ROOT), capture_output=True, text=True).stdout.split()
     if tags:
-        print("  نسخه‌های موجود:")
+        print("  Available versions:")
         for t in tags[:15]:
-            print("   • " + t)
-    target = _ask("نسخه یا تگ (خالی = انصراف)").strip()
+            print("   - " + t)
+    target = _ask("Version or tag (empty = cancel)").strip()
     if not target:
         return
     was_running = is_running()
     if _run(["git", "checkout", target]) != 0:
-        print(red("  آن نسخه پیدا نشد."))
+        print(red("  That version was not found."))
         return
     install_deps()
-    print(green(f"  اکنون روی {read_version()} هستید."))
-    print(dim("  برای بازگشت به آخرین نسخه: گزینه‌ی «به‌روزرسانی» یا «git checkout main»."))
-    if was_running and _confirm("پنل دوباره راه‌اندازی شود؟", default=True):
+    print(green(f"  You are now on {read_version()}."))
+    print(dim("  Back to latest: the 'Update' item, or 'git checkout main'."))
+    if was_running and _confirm("Restart the panel?", default=True):
         stop_panel(quiet=True)
         start_panel()
 
 
 def action_uninstall() -> None:
-    _header("حذف")
-    print(red("  این کار پنل را متوقف و محیط مجازی و اتواستارت را حذف می‌کند."))
-    if not _confirm("مطمئنید؟", default=False):
+    _header("Uninstall")
+    print(red("  This stops the panel and removes the virtualenv and autostart."))
+    if not _confirm("Are you sure?", default=False):
         return
     stop_panel(quiet=True)
     _disable_autostart(quiet=True)
     if VENV_DIR.exists():
         shutil.rmtree(VENV_DIR, ignore_errors=True)
-        print(green("  محیط مجازی حذف شد."))
+        print(green("  Virtualenv removed."))
     print()
-    print(yellow("  داده‌های شما (config.json، ca/، رمز پنل، رله‌ها) هنوز سر جایشان هستند."))
-    if _confirm("این داده‌ها هم برای همیشه پاک شوند؟", default=False):
+    print(yellow("  Your data (config.json, ca/, panel password, relays) is still here."))
+    if _confirm("Delete that data too, permanently?", default=False):
         for p in (CONFIG_JSON, DATA_DIR, ROOT / "ca"):
             if p.is_dir():
                 shutil.rmtree(p, ignore_errors=True)
             elif p.exists():
                 p.unlink()
-        print(green("  همه‌چیز پاک شد."))
-    print(dim("  فایل‌های سورس دست‌نخورده‌اند؛ برای حذف کامل، پوشه را پاک کنید."))
+        print(green("  Everything wiped."))
+    print(dim("  Source files are untouched; delete the folder to remove fully."))
 
 
 # ── settings actions ───────────────────────────────────────────────────
 def action_change_port() -> None:
-    _header("تغییر پورت پنل")
-    print(f"  پورت فعلی: {bold(panel_port())}")
-    raw = _ask("پورت جدید (۱۰۲۴ تا ۶۵۵۳۵)").strip()
+    _header("Change panel port")
+    print(f"  Current port: {bold(panel_port())}")
+    raw = _ask("New port (1024-65535)").strip()
     if not raw:
         return
     try:
@@ -421,17 +427,17 @@ def action_change_port() -> None:
         if not (1024 <= port <= 65535):
             raise ValueError
     except ValueError:
-        print(red("  پورت نامعتبر."))
+        print(red("  Invalid port."))
         return
     if port != panel_port() and _port_open("127.0.0.1", port):
-        print(red(f"  پورت {port} همین حالا اشغال است. یکی دیگر انتخاب کنید."))
+        print(red(f"  Port {port} is already in use. Pick another."))
         return
     state = load_state()
     state["port"] = port
     save_state(state)
-    print(green(f"  پورت روی {port} تنظیم شد."))
+    print(green(f"  Port set to {port}."))
     if is_running():
-        if _confirm("برای اعمال، پنل ری‌استارت شود؟", default=True):
+        if _confirm("Restart the panel to apply?", default=True):
             stop_panel(quiet=True)
             start_panel()
     if _autostart_installed():
@@ -439,17 +445,17 @@ def action_change_port() -> None:
 
 
 def action_change_password() -> None:
-    _header("تغییر رمز پنل")
-    print(dim("  این رمز، رمز ورود به خود پنل است (نه رمز کاربران پروکسی)."))
-    pw1 = _ask_secret("رمز جدید (حداقل ۱۰ کاراکتر)")
+    _header("Change panel password")
+    print(dim("  This is the login password for the panel (not proxy users)."))
+    pw1 = _ask_secret("New password (min 10 chars)")
     if pw1 is None:
         return
     if len(pw1) < 10:
-        print(red("  رمز باید حداقل ۱۰ کاراکتر باشد."))
+        print(red("  Password must be at least 10 characters."))
         return
-    pw2 = _ask_secret("تکرار رمز")
+    pw2 = _ask_secret("Repeat password")
     if pw2 != pw1:
-        print(red("  دو رمز یکسان نیستند."))
+        print(red("  Passwords do not match."))
         return
     salt = secrets.token_bytes(SALT_BYTES)
     digest = hashlib.pbkdf2_hmac("sha256", pw1.encode("utf-8"), salt, PBKDF2_ITERATIONS)
@@ -467,49 +473,49 @@ def action_change_password() -> None:
     PANEL_JSON.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n",
                           encoding="utf-8")
     _chmod_600(PANEL_JSON)
-    print(green("  رمز پنل تغییر کرد."))
+    print(green("  Panel password changed."))
     if is_running():
-        print(dim("  همه‌ی نشست‌های باز باید دوباره وارد شوند."))
+        print(dim("  Any open sessions will have to log in again."))
 
 
 def action_view_settings() -> None:
-    _header("تنظیمات فعلی")
+    _header("Current settings")
     v = read_version()
-    print(f"  نسخه‌ی پنل        : {bold(v)}")
-    print(f"  آدرس پنل         : http://{panel_host()}:{panel_port()}")
-    print(f"  وضعیت            : "
-          + (green("در حال اجرا") if is_running() else red("متوقف")))
-    print(f"  اتواستارت        : "
-          + (green("روشن") if _autostart_installed() else dim("خاموش")))
-    print(f"  محیط مجازی       : "
-          + (green("نصب‌شده") if venv_ready() else red("نصب نشده")))
-    print(f"  رمز پنل          : "
-          + (green("تنظیم‌شده") if _admin_set() else yellow("هنوز تنظیم نشده")))
-    print(dim("  ── کانفیگ رله ──"))
+    print(f"  Panel version   : {bold(v)}")
+    print(f"  Panel URL       : http://{panel_host()}:{panel_port()}")
+    print(f"  State           : "
+          + (green("running") if is_running() else red("stopped")))
+    print(f"  Autostart       : "
+          + (green("on") if _autostart_installed() else dim("off")))
+    print(f"  Virtualenv      : "
+          + (green("installed") if venv_ready() else red("not installed")))
+    print(f"  Panel password  : "
+          + (green("set") if _admin_set() else yellow("not set yet")))
+    print(dim("  -- relay config --"))
     cfg = _load_json(CONFIG_JSON)
     if not cfg:
-        print(dim("    هنوز کانفیگ رله ساخته نشده (config.json نیست)."))
+        print(dim("    No relay config yet (config.json missing)."))
     else:
-        print(f"    پورت HTTP proxy : {cfg.get('listen_port', '—')}")
-        print(f"    پورت SOCKS5     : {cfg.get('socks5_port', '—')}")
-        print(f"    دامنه‌ی فرانت    : {cfg.get('front_domain', '—')}")
-        sid = cfg.get("script_id") or cfg.get("script_ids") or "—"
+        print(f"    HTTP proxy port : {cfg.get('listen_port', '-')}")
+        print(f"    SOCKS5 port     : {cfg.get('socks5_port', '-')}")
+        print(f"    Front domain    : {cfg.get('front_domain', '-')}")
+        sid = cfg.get("script_id") or cfg.get("script_ids") or "-"
         if isinstance(sid, list):
-            sid = f"{len(sid)} اسکریپت"
+            sid = f"{len(sid)} scripts"
         print(f"    Apps Script     : {_short(str(sid))}")
-        print(f"    کلید auth       : "
-              + (green("خودکار (تنظیم‌شده)") if cfg.get("auth_key") else yellow("خالی")))
+        print(f"    Auth key        : "
+              + (green("auto (set)") if cfg.get("auth_key") else yellow("empty")))
     pj = _load_json(PANEL_JSON)
     worker = ((pj.get("cloudflare") or {}).get("worker_url")) if pj else ""
-    print(f"    Cloudflare Worker: {worker or dim('—')}")
+    print(f"    Cloudflare Worker: {worker or dim('-')}")
 
 
 def action_logs() -> None:
-    _header("لاگ زنده")
+    _header("Live log")
     if not LOG_FILE.exists():
-        print(dim("  هنوز لاگی نیست."))
+        print(dim("  No log yet."))
         return
-    print(dim("  آخرین ۴۰ خط (برای دنبال‌کردن زنده، این را در ترمینال بزنید:"))
+    print(dim("  Last 40 lines (to follow live, run this in a terminal:"))
     print(dim(f"    tail -f {LOG_FILE})"))
     print()
     _tail(LOG_FILE, 40)
@@ -548,14 +554,14 @@ def _enable_autostart(quiet: bool = False) -> None:
                        capture_output=True)
     else:
         if os.geteuid() != 0:
-            print(yellow("  برای اتواستارت روی لینوکس (systemd) به sudo نیاز است:"))
-            print(dim(f"    sudo {sys.executable} {__file__}  → سپس گزینه‌ی اتواستارت"))
+            print(yellow("  Autostart on Linux (systemd) needs sudo:"))
+            print(dim(f"    sudo {sys.executable} {__file__}   then the autostart item"))
             return
         SYSTEMD_UNIT.write_text(_systemd_unit(port, host), encoding="utf-8")
         subprocess.run(["systemctl", "daemon-reload"])
         subprocess.run(["systemctl", "enable", "--now", "aras-panel"])
     if not quiet:
-        print(green("  اتواستارت روشن شد — پنل با روشن‌شدن سیستم بالا می‌آید."))
+        print(green("  Autostart enabled — the panel starts with the system."))
 
 
 def _disable_autostart(quiet: bool = False) -> None:
@@ -570,13 +576,13 @@ def _disable_autostart(quiet: bool = False) -> None:
     else:
         if SYSTEMD_UNIT.exists():
             if os.geteuid() != 0:
-                print(yellow("  برای خاموش‌کردن اتواستارت systemd به sudo نیاز است."))
+                print(yellow("  Disabling systemd autostart needs sudo."))
                 return
             subprocess.run(["systemctl", "disable", "--now", "aras-panel"])
             SYSTEMD_UNIT.unlink(missing_ok=True)
             subprocess.run(["systemctl", "daemon-reload"])
     if not quiet:
-        print(green("  اتواستارت خاموش شد."))
+        print(green("  Autostart disabled."))
 
 
 def _systemd_unit(port: int, host: str) -> str:
@@ -622,32 +628,43 @@ def _launchd_plist(port: int, host: str) -> str:
 
 
 def action_enable_autostart() -> None:
-    _header("روشن‌کردن اتواستارت")
+    _header("Enable autostart")
     _enable_autostart()
 
 
 def action_disable_autostart() -> None:
-    _header("خاموش‌کردن اتواستارت")
+    _header("Disable autostart")
     _disable_autostart()
 
 
 def _install_global_command() -> None:
-    target_dirs = ["/usr/local/bin", str(Path.home() / ".local/bin")]
     wrapper = f'#!/usr/bin/env bash\nexec "{sys.executable}" "{__file__}" "$@"\n'
-    for d in target_dirs:
-        dst = Path(d) / "aras"
+    path_dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+
+    # Prefer a directory that is already on PATH *and* writable, so `agp` works
+    # in the same shell with no profile edit — as root on a VPS that is
+    # /usr/local/bin or /usr/bin, on a Homebrew Mac /opt/homebrew/bin.
+    on_path = [d for d in path_dirs
+               if os.path.isdir(d) and os.access(d, os.W_OK)]
+    fallback = str(Path.home() / ".local/bin")
+    for d in on_path + [fallback]:
+        dst = Path(d) / "agp"
         try:
             Path(d).mkdir(parents=True, exist_ok=True)
             dst.write_text(wrapper, encoding="utf-8")
             os.chmod(dst, 0o755)
-            print(green(f"  دستور «aras» ساخته شد: {dst}"))
-            if d.endswith(".local/bin"):
-                print(dim("  اگر کار نکرد، این را به PATH اضافه کنید: ~/.local/bin"))
+            print(green(f"  Global 'agp' command created: {dst}"))
+            if d in path_dirs:
+                print(dim("  Now just type  agp  from anywhere to open this menu."))
+            else:
+                print(yellow(f"  {d} is not on your PATH yet. Add it:"))
+                print(dim(f'    echo \'export PATH="{d}:$PATH"\' >> ~/.bashrc'))
+                print(dim("  (or ~/.zshrc on macOS), then open a new terminal."))
             return
         except OSError:
             continue
-    print(yellow("  نشد دستور سراسری ساخته شود (دسترسی کافی نبود). "
-                 "با ./aras.sh اجرا کنید."))
+    print(yellow("  Could not create a global command (no permission). "
+                 "Run it with ./agp.sh instead."))
 
 
 # ── backup / export / import / reset ───────────────────────────────────
@@ -727,44 +744,44 @@ def list_backups() -> list[Path]:
 
 
 def action_backup() -> None:
-    _header("پشتیبان‌گیری")
+    _header("Backup")
     try:
         path, n = create_backup()
     except OSError as exc:
-        print(red(f"  پشتیبان‌گیری ناموفق بود: {exc}"))
+        print(red(f"  Backup failed: {exc}"))
         return
     size = path.stat().st_size
-    print(green(f"  پشتیبان ساخته شد ({n} بخش، {size // 1024} کیلوبایت):"))
+    print(green(f"  Backup created ({n} parts, {size // 1024} KB):"))
     print("   " + str(path))
-    print(yellow("  این فایل رمز و کلید دارد — جای امن نگه دارید (دسترسی ۰۶۰۰)."))
-    print(dim("  برای بردن به سرور دیگر: از گزینه‌ی «خروجی» یا مستقیم scp کنید."))
+    print(yellow("  It holds secrets and keys — keep it safe (mode 0600)."))
+    print(dim("  To move it to another server: use Export, or scp it directly."))
 
 
 def action_export() -> None:
-    _header("خروجی گرفتن به مسیر دلخواه")
-    raw = _ask("پوشه‌ی مقصد (خالی = پوشه‌ی خانه)").strip()
+    _header("Export backup to a path")
+    raw = _ask("Destination folder (empty = your home dir)").strip()
     dest = Path(os.path.expanduser(raw)) if raw else Path.home()
     if not dest.is_dir():
-        print(red(f"  پوشه پیدا نشد: {dest}"))
+        print(red(f"  Folder not found: {dest}"))
         return
     try:
         path, n = create_backup(dest)
     except OSError as exc:
-        print(red(f"  ناموفق: {exc}"))
+        print(red(f"  Failed: {exc}"))
         return
-    print(green(f"  خروجی ذخیره شد: {path}"))
+    print(green(f"  Exported to: {path}"))
 
 
 def action_import() -> None:
-    _header("بازگردانی از پشتیبان")
+    _header("Restore from backup")
     backups = list_backups()
     chosen: Path | None = None
     if backups:
-        print("  پشتیبان‌های موجود:")
+        print("  Available backups:")
         for i, b in enumerate(backups[:10], 1):
             when = time.strftime("%Y-%m-%d %H:%M", time.localtime(b.stat().st_mtime))
             print(f"   {i}. {b.name}  ({when})")
-        pick = _ask("شماره‌ی پشتیبان، یا مسیر فایل (خالی = انصراف)").strip()
+        pick = _ask("Backup number, or a file path (empty = cancel)").strip()
         if not pick:
             return
         if pick.isdigit() and 1 <= int(pick) <= len(backups[:10]):
@@ -772,16 +789,16 @@ def action_import() -> None:
         else:
             chosen = Path(os.path.expanduser(pick))
     else:
-        pick = _ask("مسیر فایل پشتیبان (.tar.gz)").strip()
+        pick = _ask("Path to a backup file (.tar.gz)").strip()
         if not pick:
             return
         chosen = Path(os.path.expanduser(pick))
 
     if not chosen or not chosen.exists():
-        print(red("  فایل پشتیبان پیدا نشد."))
+        print(red("  Backup file not found."))
         return
-    print(yellow(f"  «{chosen.name}» روی داده‌های فعلی بازنویسی می‌شود."))
-    if not _confirm("ادامه؟", default=False):
+    print(yellow(f"  '{chosen.name}' will overwrite your current data."))
+    if not _confirm("Continue?", default=False):
         return
     was_running = is_running()
     if was_running:
@@ -789,18 +806,18 @@ def action_import() -> None:
     try:
         n = restore_backup(chosen)
     except (OSError, tarfile.TarError) as exc:
-        print(red(f"  بازگردانی ناموفق بود: {exc}"))
+        print(red(f"  Restore failed: {exc}"))
         return
-    print(green(f"  بازگردانی شد ({n} فایل)."))
-    if was_running and _confirm("پنل دوباره راه‌اندازی شود؟", default=True):
+    print(green(f"  Restored ({n} files)."))
+    if was_running and _confirm("Restart the panel?", default=True):
         start_panel()
 
 
 def action_reset() -> None:
-    _header("بازنشانی به حالت اولیه")
-    print(red("  این کار رمز پنل، توکن کلودفلر، رله‌ها و دوستان ذخیره‌شده را پاک می‌کند."))
-    print(dim("  گواهی CA و فایل‌های سورس دست نمی‌خورند."))
-    if not _confirm("مطمئنید؟ (پیشنهاد: اول یک پشتیبان بگیرید)", default=False):
+    _header("Reset to factory")
+    print(red("  This wipes the panel password, Cloudflare token, saved relays and friends."))
+    print(dim("  The CA certificate and the source files are left alone."))
+    if not _confirm("Are you sure? (tip: take a backup first)", default=False):
         return
     if is_running():
         stop_panel(quiet=True)
@@ -810,38 +827,39 @@ def action_reset() -> None:
         profiles = DATA_DIR / "profiles"
         if profiles.is_dir():
             shutil.rmtree(profiles, ignore_errors=True)
-        if _confirm("کانفیگ رله (config.json) هم پاک شود؟", default=False):
+        if _confirm("Delete the relay config (config.json) too?", default=False):
             CONFIG_JSON.unlink(missing_ok=True)
     except OSError as exc:
-        print(red(f"  خطا: {exc}"))
+        print(red(f"  Error: {exc}"))
         return
-    print(green("  بازنشانی شد. دفعه‌ی بعد پنل مرحله‌ی راه‌اندازی اولیه را نشان می‌دهد."))
+    print(green("  Reset done. Next start, the panel shows first-run setup."))
 
 
 # ── panel host (LAN access) ────────────────────────────────────────────
 def action_toggle_lan() -> None:
-    _header("دسترسی از شبکه (LAN)")
+    _header("LAN access")
     host = panel_host()
     on_lan = host not in ("127.0.0.1", "localhost", "::1")
     if on_lan:
-        print(f"  الان پنل روی {bold(host)} است (از شبکه در دسترس).")
-        if _confirm("برگردد به فقط همین دستگاه (127.0.0.1)؟", default=True):
+        print(f"  The panel is on {bold(host)} now (reachable from the network).")
+        if _confirm("Switch back to this device only (127.0.0.1)?", default=True):
             _set_host("127.0.0.1")
         return
-    print("  الان پنل فقط روی همین دستگاه است (127.0.0.1).")
-    print(yellow("  هشدار: باز کردن روی شبکه یعنی هر کسی در همان شبکه می‌تواند به"))
-    print(yellow("  پنل برسد. پنل رمز و توکن کلودفلر دارد — رمز قوی حتماً بگذارید."))
-    if _confirm("روی کل شبکه باز شود (برای دسترسی از گوشی)؟", default=False):
+    print("  The panel is on this device only (127.0.0.1) now.")
+    print(yellow("  Warning: opening it to the network lets anyone on that network"))
+    print(yellow("  reach the panel. It holds your password and Cloudflare token —"))
+    print(yellow("  set a strong panel password first."))
+    if _confirm("Open it to the whole network (reach it from a phone)?", default=False):
         _set_host("0.0.0.0")
-        print(dim(f"  از گوشی: http://<IP این دستگاه>:{panel_port()}"))
+        print(dim(f"  From a phone: http://<this device's IP>:{panel_port()}"))
 
 
 def _set_host(host: str) -> None:
     state = load_state()
     state["host"] = host
     save_state(state)
-    print(green(f"  تنظیم شد: {host}"))
-    if is_running() and _confirm("برای اعمال، پنل ری‌استارت شود؟", default=True):
+    print(green(f"  Set to {host}."))
+    if is_running() and _confirm("Restart the panel to apply?", default=True):
         stop_panel(quiet=True)
         start_panel()
     if _autostart_installed():
@@ -849,24 +867,24 @@ def _set_host(host: str) -> None:
 
 
 def action_open_browser() -> None:
-    _header("باز کردن پنل در مرورگر")
+    _header("Open the panel in a browser")
     url = f"http://{('127.0.0.1' if panel_host() in ('0.0.0.0', '::') else panel_host())}:{panel_port()}"
     if not is_running():
-        print(yellow("  پنل خاموش است؛ اول روشنش کنید (گزینه‌ی ۵)."))
+        print(yellow("  The panel is off; start it first (item 5)."))
     print("  " + bold(url))
     try:
         if webbrowser.open(url):
-            print(green("  در مرورگر باز شد."))
+            print(green("  Opened in your browser."))
         else:
-            print(dim("  مرورگری پیدا نشد (سرور بدون گرافیک؟) — آدرس بالا را باز کنید."))
+            print(dim("  No browser found (headless server?) — open the URL above."))
     except Exception:
-        print(dim("  نشد به‌صورت خودکار باز شود — آدرس بالا را دستی باز کنید."))
+        print(dim("  Could not open it automatically — open the URL above."))
 
 
 # ── input helpers ──────────────────────────────────────────────────────
 def _ask(prompt: str) -> str:
     try:
-        return input(blue("  » ") + prompt + ": ")
+        return input(blue("  > ") + prompt + ": ")
     except (EOFError, KeyboardInterrupt):
         print()
         return ""
@@ -874,7 +892,7 @@ def _ask(prompt: str) -> str:
 
 def _ask_secret(prompt: str) -> str | None:
     try:
-        return getpass.getpass(f"  » {prompt}: ")
+        return getpass.getpass(f"  > {prompt}: ")
     except (EOFError, KeyboardInterrupt):
         print()
         return None
@@ -885,7 +903,7 @@ def _confirm(prompt: str, default: bool = False) -> bool:
     ans = _ask(f"{prompt} {hint}").strip().lower()
     if not ans:
         return default
-    return ans in ("y", "yes", "بله", "آره")
+    return ans in ("y", "yes")
 
 
 def _load_json(path: Path) -> dict:
@@ -900,73 +918,56 @@ def _admin_set() -> bool:
 
 
 def _short(text: str, keep: int = 22) -> str:
-    return text if len(text) <= keep else text[:keep] + "…"
+    return text if len(text) <= keep else text[:keep] + "..."
 
 
 def _header(title: str) -> None:
     print()
-    print(purple("  ── " + title + " ──"))
+    print(purple("  -- " + title + " --"))
 
 
 # ── menu ───────────────────────────────────────────────────────────────
-_W = 52
+_W = 46
 
 
-def _line(ch: str = "─") -> str:
-    return "│" + ch * _W + "│"
+def _line() -> str:
+    return "|" + "-" * _W + "|"
 
 
 def _row(text: str) -> str:
-    # length ignoring ANSI, to pad the visible box correctly
-    visible = re.sub(r"\x1b\[[0-9;]*m", "", text)
-    pad = _W - 2 - _display_width(visible)
-    return "│  " + text + " " * max(0, pad) + "│"
-
-
-def _display_width(s: str) -> int:
-    # Cell width for the box padding. Persian labels carry zero-width joiners
-    # (the نیم‌فاصله, U+200C) and combining marks that take no column — counting
-    # them with len() shifts the closing border left on those rows, which is
-    # what made the menu look ragged.
-    import unicodedata
-    width = 0
-    for ch in s:
-        if ch in ("‌", "‍"):
-            continue
-        if unicodedata.combining(ch):
-            continue
-        width += 1
-    return width
+    visible = re.sub(r"\x1b\[[0-9;]*m", "", text)   # measure without ANSI
+    pad = _W - 2 - len(visible)
+    return "|  " + text + " " * max(0, pad) + "|"
 
 
 # Data-driven so the box, the numbering and the dispatch table can never drift
-# apart: one list is the whole menu. "—" is a section rule.
+# apart: one list is the whole menu. "-" is a section rule.
 MENU: list = [
-    ("1", "نصب"),
-    ("2", "به‌روزرسانی"),
-    ("3", "استفاده از نسخه‌ی مشخص (قدیمی)"),
-    ("4", "حذف"),
-    "—",
-    ("5", "روشن‌کردن"),
-    ("6", "خاموش‌کردن"),
-    ("7", "ری‌استارت"),
-    ("8", "وضعیت"),
-    ("9", "لاگ‌ها"),
-    "—",
-    ("10", "تغییر پورت پنل"),
-    ("11", "تغییر رمز پنل"),
-    ("12", "دسترسی از شبکه (LAN)"),
-    ("13", "مشاهده‌ی تنظیمات"),
-    "—",
-    ("14", "پشتیبان‌گیری"),
-    ("15", "خروجی گرفتن به مسیر دلخواه"),
-    ("16", "بازگردانی از پشتیبان"),
-    ("17", "بازنشانی به حالت اولیه"),
-    "—",
-    ("18", "روشن‌کردن اتواستارت"),
-    ("19", "خاموش‌کردن اتواستارت"),
-    "—",
-    ("20", "باز کردن پنل در مرورگر"),
+    ("1", "Install"),
+    ("2", "Update"),
+    ("3", "Use a specific version (legacy)"),
+    ("4", "Uninstall"),
+    "-",
+    ("5", "Start"),
+    ("6", "Stop"),
+    ("7", "Restart"),
+    ("8", "Status"),
+    ("9", "Logs"),
+    "-",
+    ("10", "Change panel port"),
+    ("11", "Change panel password"),
+    ("12", "LAN access (localhost / network)"),
+    ("13", "View settings"),
+    "-",
+    ("14", "Backup"),
+    ("15", "Export backup to a path"),
+    ("16", "Restore from backup"),
+    ("17", "Reset to factory"),
+    "-",
+    ("18", "Enable autostart"),
+    ("19", "Disable autostart"),
+    "-",
+    ("20", "Open the panel in a browser"),
 ]
 
 ACTIONS = {
@@ -998,50 +999,50 @@ _MAX_CHOICE = max(int(k) for k in ACTIONS)
 def draw_menu() -> None:
     running = is_running()
     v = read_version()
-    state_txt = green("در حال اجرا") if running else red("متوقف")
-    auto_txt = green("بله") if _autostart_installed() else "خیر"
+    state_txt = green("running") if running else red("stopped")
+    auto_txt = green("on") if _autostart_installed() else "off"
 
     print()
-    print(blue("╔" + "─" * _W + "╗"))
-    print(blue(_row(bold("Aras-GP  —  مدیریت پنل") + dim(f"   v{v}"))))
+    print(blue("+" + "-" * _W + "+"))
+    print(blue(_row(bold("Aras-GP  -  Panel Manager") + dim(f"   v{v}"))))
     print(blue(_line()))
-    print(blue(_row("0. خروج")))
+    print(blue(_row("0. Exit")))
     print(blue(_line()))
     for item in MENU:
-        if item == "—":
+        if item == "-":
             print(blue(_line()))
         else:
             num, label = item
             print(blue(_row(f"{num}. {label}")))
-    print(blue("╚" + "─" * _W + "╝"))
+    print(blue("+" + "-" * _W + "+"))
     url = f"http://{panel_host()}:{panel_port()}"
-    print(f"  وضعیت پنل   : {state_txt}" + (dim("   " + url) if running else ""))
-    print(f"  اتواستارت   : {auto_txt}")
+    print(f"  Panel     : {state_txt}" + (dim("   " + url) if running else ""))
+    print(f"  Autostart : {auto_txt}")
 
 
 def menu_loop() -> None:
     while True:
         draw_menu()
         try:
-            choice = input(blue("  » ") + f"انتخاب کنید [0-{_MAX_CHOICE}]: ").strip()
+            choice = input(blue("  > ") + f"Select [0-{_MAX_CHOICE}]: ").strip()
         except (EOFError, KeyboardInterrupt):
             # A closed or piped-empty stdin must end the menu, not spin on it.
             print()
             return
         if choice in ("0", "q", "exit", "quit"):
-            print(dim("  خدانگهدار."))
+            print(dim("  Bye."))
             return
         action = ACTIONS.get(choice)
         if not action:
-            print(red("  گزینه‌ی نامعتبر."))
+            print(red("  Invalid choice."))
             continue
         try:
             action()
         except KeyboardInterrupt:
             print()
         except Exception as exc:      # never let one action crash the menu
-            print(red(f"  خطا: {exc}"))
-        _ask("Enter برای ادامه")
+            print(red(f"  Error: {exc}"))
+        _ask("Press Enter to continue")
 
 
 # ── non-interactive CLI (for services and scripting) ───────────────────
