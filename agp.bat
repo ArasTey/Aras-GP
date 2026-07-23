@@ -1,7 +1,7 @@
 @echo off
 REM Aras-GP manager launcher (Windows).
-REM   Menu:        aras.bat
-REM   One-shot:    aras.bat start ^| stop ^| restart ^| status ^| install ^| version
+REM   Menu:        agp.bat
+REM   One-shot:    agp.bat start ^| stop ^| restart ^| status ^| install ^| version
 cd /d "%~dp0"
 
 where py >nul 2>&1
