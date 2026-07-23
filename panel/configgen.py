@@ -65,6 +65,12 @@ FIELDS: tuple[tuple[str, str, object], ...] = (
     ("direct_google_exclude",        "list",   None),
     ("direct_google_allow",          "list",   None),
     ("youtube_via_relay",            "bool",   False),
+    # Response cache. The disk tier is what makes a second visit free, so it
+    # is on by default; the operator can still size it or turn it off.
+    ("cache_enabled",                "bool",   True),
+    ("cache_memory_mb",              "int",    50),
+    ("cache_disk_mb",                "int",    512),
+    ("dns_cache_ttl",                "int",    300),
 )
 
 # Sensible lower bounds — the relay itself clamps some of these, but catching

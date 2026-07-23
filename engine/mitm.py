@@ -167,6 +167,38 @@ class MITMCertManager:
         log.warning("Generated new CA certificate: %s", CA_CERT_FILE)
         log.warning(">>> Install this file in your browser's Trusted Root CAs! <<<")
 
+    def get_dispatch_context(self, fallback_domain: str) -> ssl.SSLContext:
+        """A context that picks its certificate from the client's real SNI.
+
+        Browsers CONNECT to the hostname they want, so naming the certificate
+        after the CONNECT target worked for them. Native apps often do not:
+        they CONNECT to an IP address, or to one host while requesting a
+        certificate for another, and then reject the certificate we minted for
+        the wrong name. Deciding inside the handshake — where the SNI actually
+        is — serves the right certificate to both.
+
+        The returned context still carries a certificate for *fallback_domain*
+        so a client that sends no SNI at all still completes a handshake.
+        """
+        ctx = self.get_server_context(fallback_domain)
+
+        def _pick(sslobj, server_name, _ctx):
+            if not server_name or server_name == fallback_domain:
+                return None
+            try:
+                sslobj.context = self.get_server_context(server_name)
+            except Exception as exc:      # never abort a handshake over this
+                log.debug("SNI %r: keeping fallback certificate (%s)",
+                          server_name, exc)
+            return None
+
+        # sni_callback belongs to the context, and contexts are shared through
+        # the cache, so set it once per context rather than per connection.
+        if getattr(ctx, "_aras_sni_wired", False) is False:
+            ctx.sni_callback = _pick
+            ctx._aras_sni_wired = True
+        return ctx
+
     def get_server_context(self, domain: str) -> ssl.SSLContext:
         cached = self._ctx_cache.get(domain)
         if cached is not None:

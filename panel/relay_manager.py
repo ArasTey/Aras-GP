@@ -298,12 +298,16 @@ class RelayManager:
             data["account_totals"] = server.accounts.totals()
             data["auth_required"] = server.accounts.required
             data["socks_active"] = server.socks_active
+            data["cache"] = server.cache_stats()
             return data
 
         empty = {
             "per_site": [], "blacklisted_scripts": [], "sni_rotation": [],
             "parallel_relay": 0, "accounts": [], "auth_required": False,
             "socks_active": False, "last_error": "", "last_error_at": 0.0,
+            "cache": {"hits": 0, "misses": 0, "disk_hits": 0, "hit_rate": 0.0,
+                      "memory_bytes": 0, "disk_bytes": 0,
+                      "disk_enabled": False, "disk_dir": ""},
             "account_totals": {"accounts": 0, "active": 0, "connections": 0,
                                "up_bytes": 0, "down_bytes": 0},
         }
@@ -525,6 +529,7 @@ class RelayManager:
             "ca_trusted": _ca_trusted_cached(),
             "ca_path": CA_CERT_FILE,
             "ca_stale": _stale_cached(),
+            "cache": (snapshot or {}).get("cache") or {},
             "failover": self.failover.snapshot(),
         }
 

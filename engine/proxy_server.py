@@ -42,6 +42,7 @@ from constants import (
     UNCACHEABLE_HEADER_NAMES,
 )
 from account_manager import AccountManager, CountedReader, CountedWriter
+from cache import ResponseCache, default_cache_dir
 from domain_fronter import DomainFronter
 
 log = logging.getLogger("Proxy")
@@ -75,6 +76,17 @@ def _parse_content_length(header_block: bytes) -> int:
     return 0
 
 
+def _is_upgrade_request(header_block: bytes) -> bool:
+    """True for WebSocket and other Connection: Upgrade handshakes."""
+    for raw_line in header_block.split(b"\r\n"):
+        name, sep, value = raw_line.partition(b":")
+        if not sep:
+            continue
+        if name.strip().lower() == b"upgrade" and value.strip():
+            return True
+    return False
+
+
 def _has_unsupported_transfer_encoding(header_block: bytes) -> bool:
     """True when the request uses Transfer-Encoding, which we don't stream."""
     for raw_line in header_block.split(b"\r\n"):
@@ -90,81 +102,6 @@ def _has_unsupported_transfer_encoding(header_block: bytes) -> bool:
         ]
         return any(token != "identity" for token in encodings)
     return False
-
-
-class ResponseCache:
-    """Simple LRU response cache — avoids repeated relay calls."""
-
-    def __init__(self, max_mb: int = 50):
-        self._store: dict[str, tuple[bytes, float]] = {}
-        self._size = 0
-        self._max = max_mb * 1024 * 1024
-        self.hits = 0
-        self.misses = 0
-
-    def get(self, url: str) -> bytes | None:
-        entry = self._store.get(url)
-        if not entry:
-            self.misses += 1
-            return None
-        raw, expires = entry
-        if time.time() > expires:
-            self._size -= len(raw)
-            del self._store[url]
-            self.misses += 1
-            return None
-        self.hits += 1
-        return raw
-
-    def put(self, url: str, raw_response: bytes, ttl: int = 300):
-        size = len(raw_response)
-        if size > self._max // 4 or size == 0:
-            return
-        # Evict oldest to make room
-        while self._size + size > self._max and self._store:
-            oldest = next(iter(self._store))
-            self._size -= len(self._store[oldest][0])
-            del self._store[oldest]
-        if url in self._store:
-            self._size -= len(self._store[url][0])
-        self._store[url] = (raw_response, time.time() + ttl)
-        self._size += size
-
-    @staticmethod
-    def parse_ttl(raw_response: bytes, url: str) -> int:
-        """Determine cache TTL from response headers and URL."""
-        hdr_end = raw_response.find(b"\r\n\r\n")
-        if hdr_end < 0:
-            return 0
-        hdr = raw_response[:hdr_end].decode(errors="replace").lower()
-
-        # Don't cache errors or non-200
-        if b"HTTP/1.1 200" not in raw_response[:20]:
-            return 0
-        if "no-store" in hdr or "private" in hdr or "set-cookie:" in hdr:
-            return 0
-
-        # Explicit max-age
-        m = re.search(r"max-age=(\d+)", hdr)
-        if m:
-            return min(int(m.group(1)), CACHE_TTL_MAX)
-
-        # Heuristic by content type / extension
-        path = url.split("?")[0].lower()
-        for ext in STATIC_EXTS:
-            if path.endswith(ext):
-                return CACHE_TTL_STATIC_LONG
-
-        ct_m = re.search(r"content-type:\s*([^\r\n]+)", hdr)
-        ct = ct_m.group(1) if ct_m else ""
-        if "image/" in ct or "font/" in ct:
-            return CACHE_TTL_STATIC_LONG
-        if "text/css" in ct or "javascript" in ct:
-            return CACHE_TTL_STATIC_MED
-        if "text/html" in ct or "application/json" in ct:
-            return 0  # don't cache dynamic content by default
-
-        return 0
 
 
 class ProxyServer:
@@ -214,7 +151,25 @@ class ProxyServer:
         self.socks_active = False
         self._sweeper: asyncio.Task | None = None
         self.mitm = None
-        self._cache = ResponseCache(max_mb=CACHE_MAX_MB)
+        # Two-tier cache. The disk tier is what makes a second visit to a site
+        # cost nothing: without it every restart re-fetched every asset over
+        # the Apps Script chain, at ~2 s and one quota unit each.
+        self._cache = ResponseCache(
+            max_mb=self._cfg_int(config, "cache_memory_mb", CACHE_MAX_MB),
+            disk_mb=self._cfg_int(config, "cache_disk_mb", 512, minimum=0),
+            disk_dir=config.get("cache_dir") or default_cache_dir(),
+            disk_enabled=config.get("cache_enabled", True),
+        )
+        # host -> expiry for destinations whose TLS we must not intercept:
+        # certificate-pinning apps and non-TLS protocols on 443. Populated by
+        # observed handshake failures, so an app teaches us once and then
+        # works. See _remember_mitm_failure.
+        self._mitm_fail_until: dict[str, float] = {}
+        # Cached DNS answers for the direct path, so a tunnelled app does not
+        # pay for a resolver round trip on every connection it opens.
+        self._dns_cache: dict[tuple[str, int], tuple[list, float]] = {}
+        self._dns_ttl = self._cfg_float(config, "dns_cache_ttl", 300.0,
+                                        minimum=0.0)
         self._direct_fail_until: dict[str, float] = {}
         self._servers: list[asyncio.base_events.Server] = []
         self._client_tasks: set[asyncio.Task] = set()
@@ -329,6 +284,10 @@ class ProxyServer:
         if not normalized and not any_extension:
             normalized = list(cls._DOWNLOAD_DEFAULT_EXTS)
         return tuple(normalized), any_extension
+
+    def cache_stats(self) -> dict:
+        """Cache counters for the panel's status page."""
+        return self._cache.stats()
 
     def _track_current_task(self) -> asyncio.Task | None:
         task = asyncio.current_task()
@@ -1016,6 +975,35 @@ class ProxyServer:
             keys.append("*.googleusercontent.com")
         return tuple(dict.fromkeys(keys))
 
+    def _dns_cached(self, host: str, port: int) -> list | None:
+        """Recent resolver answer for this host, or None.
+
+        An app opening twenty connections to the same service resolved it
+        twenty times; a phone waking up does it for every host at once. The
+        entries are short-lived on purpose — a CDN moving to a new address
+        should reach us within the TTL, not after a restart.
+        """
+        if self._dns_ttl <= 0:
+            return None
+        entry = self._dns_cache.get((host, port))
+        if entry is None:
+            return None
+        candidates, expires = entry
+        if time.time() > expires:
+            self._dns_cache.pop((host, port), None)
+            return None
+        return list(candidates)
+
+    def _dns_remember(self, host: str, port: int, candidates: list) -> None:
+        if self._dns_ttl <= 0 or not candidates:
+            return
+        # Plain size cap: this is a cache, not a resolver, and an unbounded
+        # dict here is a slow leak on a box that proxies a whole LAN.
+        if len(self._dns_cache) > 2048:
+            self._dns_cache.clear()
+        self._dns_cache[(host, port)] = (list(candidates),
+                                         time.time() + self._dns_ttl)
+
     async def _open_tcp_connection(self, target: str, port: int,
                                    timeout: float = 10.0):
         """Connect with IPv4-first resolution and clearer failure reporting."""
@@ -1033,30 +1021,37 @@ class ProxyServer:
             ipaddress.ip_address(lookup_target)
             candidates = [(0, lookup_target)]
         except ValueError:
-            try:
-                infos = await asyncio.wait_for(
-                    loop.getaddrinfo(
-                        lookup_target,
-                        port,
-                        family=socket.AF_UNSPEC,
-                        type=socket.SOCK_STREAM,
-                    ),
-                    timeout=timeout,
+            candidates = self._dns_cached(lookup_target, port)
+            if candidates is None:
+                try:
+                    infos = await asyncio.wait_for(
+                        loop.getaddrinfo(
+                            lookup_target,
+                            port,
+                            family=socket.AF_UNSPEC,
+                            type=socket.SOCK_STREAM,
+                        ),
+                        timeout=timeout,
+                    )
+                except Exception as exc:
+                    raise OSError(
+                        f"dns lookup failed for {lookup_target}: {exc!r}"
+                    ) from exc
+
+                candidates = []
+                seen = set()
+                for family, _type, _proto, _canon, sockaddr in infos:
+                    ip = sockaddr[0]
+                    key = (family, ip)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    candidates.append((family, ip))
+
+                candidates.sort(
+                    key=lambda item: 0 if item[0] == socket.AF_INET else 1,
                 )
-            except Exception as exc:
-                raise OSError(f"dns lookup failed for {lookup_target}: {exc!r}") from exc
-
-            candidates = []
-            seen = set()
-            for family, _type, _proto, _canon, sockaddr in infos:
-                ip = sockaddr[0]
-                key = (family, ip)
-                if key in seen:
-                    continue
-                seen.add(key)
-                candidates.append((family, ip))
-
-            candidates.sort(key=lambda item: 0 if item[0] == socket.AF_INET else 1)
+                self._dns_remember(lookup_target, port, candidates)
 
         for family, ip in candidates:
             try:
@@ -1129,6 +1124,73 @@ class ProxyServer:
             pipe(r_remote, writer, f"{host}→client"),
         )
         return True
+
+    async def _tunnel_upgrade(self, host: str, port: int, reader, writer,
+                              header_block: bytes):
+        """Carry an upgraded connection (WebSocket &c.) straight to the origin.
+
+        We are already inside the intercepted TLS session, so the bytes here
+        are plaintext HTTP. Open our own TLS connection to the real server,
+        replay the handshake request we just consumed, and then get out of the
+        way — after a 101 the stream is no longer HTTP and nothing about it
+        can be relayed request-by-request.
+        """
+        log.info("Upgrade tunnel → %s:%d (relay cannot carry a 101)", host, port)
+
+        ssl_ctx = ssl.create_default_context()
+        if certifi is not None:
+            try:
+                ssl_ctx.load_verify_locations(cafile=certifi.where())
+            except Exception:
+                pass
+        if not self.fronter.verify_ssl:
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+        try:
+            r_remote, w_remote = await asyncio.wait_for(
+                asyncio.open_connection(host, port, ssl=ssl_ctx,
+                                        server_hostname=host),
+                timeout=self._tcp_connect_timeout,
+            )
+        except Exception as exc:
+            log.warning("Upgrade tunnel to %s:%d failed: %s", host, port, exc)
+            try:
+                writer.write(b"HTTP/1.1 502 Bad Gateway\r\n"
+                             b"Connection: close\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+            except Exception:
+                pass
+            return
+
+        try:
+            w_remote.write(header_block)
+            await w_remote.drain()
+        except Exception as exc:
+            log.debug("Upgrade replay failed (%s): %s", host, exc)
+            w_remote.close()
+            return
+
+        async def pipe(src, dst):
+            try:
+                while True:
+                    data = await src.read(65536)
+                    if not data:
+                        break
+                    dst.write(data)
+                    await dst.drain()
+            except (ConnectionError, asyncio.CancelledError):
+                pass
+            except Exception as exc:
+                log.debug("Upgrade pipe ended (%s): %s", host, exc)
+            finally:
+                try:
+                    if not dst.is_closing():
+                        dst.close()
+                except Exception:
+                    pass
+
+        await asyncio.gather(pipe(reader, w_remote), pipe(r_remote, writer))
 
     # ── SNI-rewrite tunnel ────────────────────────────────────────
 
@@ -1212,9 +1274,54 @@ class ProxyServer:
         log.info("Plain HTTP relay → %s:%d", host, port)
         await self._relay_http_stream(host, port, reader, writer)
 
+    def _mitm_temporarily_disabled(self, host: str) -> bool:
+        """True while a host is known to reject interception."""
+        until = self._mitm_fail_until.get(host.lower().rstrip("."), 0.0)
+        if until and until > time.time():
+            return True
+        if until:
+            self._mitm_fail_until.pop(host.lower().rstrip("."), None)
+        return False
+
+    def _forget_mitm_failure(self, host: str) -> None:
+        self._mitm_fail_until.pop(host.lower().rstrip("."), None)
+
+    def _remember_mitm_failure(self, host: str, ttl: int = 600) -> None:
+        """Stop intercepting a host that would not complete our handshake.
+
+        Two kinds of client end up here and both are ordinary desktop apps:
+        those that pin their server's certificate and refuse ours, and those
+        that speak something other than TLS on port 443. Previously each got
+        its connection closed and no explanation, forever — which is why the
+        proxy worked for websites and broke applications. One failed attempt
+        now teaches us to tunnel that host untouched, and apps retry, so the
+        second attempt succeeds.
+        """
+        key = host.lower().rstrip(".")
+        if key in self._mitm_fail_until:
+            return
+        self._mitm_fail_until[key] = time.time() + ttl
+        log.info("Not intercepting %s for %d min — it refused our certificate "
+                 "or is not speaking TLS; tunnelling it directly instead.",
+                 host, ttl // 60)
+
     async def _do_mitm_connect(self, host: str, port: int, reader, writer):
         """Intercept TLS, decrypt HTTP, and relay through Apps Script."""
-        ssl_ctx = self.mitm.get_server_context(host)
+        # A host that already refused interception is tunnelled untouched, so
+        # the app that taught us that works from now on.
+        if self._mitm_temporarily_disabled(host):
+            if await self._do_direct_tunnel(host, port, reader, writer):
+                return
+            # Going straight out did not work either, so this host is one the
+            # relay has to carry — a censored destination, or a handshake that
+            # failed for a passing reason. Forget the note rather than leave
+            # the site broken for the rest of the window.
+            log.warning("Passthrough failed for %s:%d — resuming interception",
+                        host, port)
+            self._forget_mitm_failure(host)
+            return
+
+        ssl_ctx = self.mitm.get_dispatch_context(host)
 
         # Upgrade the existing connection to TLS (we are the server)
         loop = asyncio.get_running_loop()
@@ -1226,6 +1333,15 @@ class ProxyServer:
                 transport, protocol, ssl_ctx, server_side=True,
             )
         except Exception as e:
+            # Only an SSL-level failure means the client and our certificate
+            # genuinely disagree — a pinning app sending "unknown ca", or
+            # something that is not TLS at all hitting the record parser.
+            # A reset or a bare EOF just means the client walked away, which
+            # browsers do constantly with speculative connections; treating
+            # that as "stop intercepting" would push real sites onto a direct
+            # route the censor blocks.
+            if isinstance(e, ssl.SSLError):
+                self._remember_mitm_failure(host)
             # TLS handshake failed. Common causes:
             #   • Telegram Desktop / MTProto over port 443 sends obfuscated
             #     non-TLS bytes — we literally cannot decrypt these, and
@@ -1302,6 +1418,19 @@ class ProxyServer:
                     except Exception:
                         pass
                     break
+
+                # A protocol upgrade cannot cross the relay: Apps Script
+                # answers one request with one response and has no way to
+                # express a 101 or the bidirectional stream that follows.
+                # Relaying it anyway returned something the client could not
+                # parse and left it waiting — which is how live chat, push
+                # notifications and most desktop apps' realtime channels
+                # appeared to "connect and then do nothing". Hand these to a
+                # direct tunnel and replay the request we already consumed.
+                if _is_upgrade_request(header_block):
+                    await self._tunnel_upgrade(host, port, reader, writer,
+                                               header_block)
+                    return
 
                 # Read body
                 body = b""
@@ -1383,7 +1512,7 @@ class ProxyServer:
                 # Check local cache first (GET only)
                 response = None
                 if self._cache_allowed(method, url, headers, body):
-                    response = self._cache.get(url)
+                    response = await self._cache.get_async(url)
                     if response:
                         log.debug("Cache HIT: %s", url[:60])
 
@@ -1405,7 +1534,7 @@ class ProxyServer:
                     if self._cache_allowed(method, url, headers, body) and response:
                         ttl = ResponseCache.parse_ttl(response, url)
                         if ttl > 0:
-                            self._cache.put(url, response, ttl)
+                            self._cache.put_async(url, response, ttl)
                             log.debug("Cached (%ds): %s", ttl, url[:60])
 
                 # Inject permissive CORS headers whenever the browser sent
@@ -1607,7 +1736,7 @@ class ProxyServer:
         # Cache check for GET
         response = None
         if self._cache_allowed(method, url, headers, body):
-            response = self._cache.get(url)
+            response = await self._cache.get_async(url)
             if response:
                 log.debug("Cache HIT (HTTP): %s", url[:60])
 
@@ -1617,7 +1746,7 @@ class ProxyServer:
             if self._cache_allowed(method, url, headers, body) and response:
                 ttl = ResponseCache.parse_ttl(response, url)
                 if ttl > 0:
-                    self._cache.put(url, response, ttl)
+                    self._cache.put_async(url, response, ttl)
 
         if origin and response:
             response = self._inject_cors_headers(response, origin)
