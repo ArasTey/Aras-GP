@@ -155,7 +155,12 @@ def main():
     config_path = args.config
 
     try:
-        with open(config_path) as f:
+        # Always UTF-8: the panel writes this file with ensure_ascii=False, so
+        # a Persian user note lands as real UTF-8 bytes. Opening it with the
+        # platform default reads it as cp1252 on Windows and dies on the first
+        # non-Latin character — the relay would refuse to start with a config
+        # the panel had just written successfully.
+        with open(config_path, encoding="utf-8") as f:
             config = json.load(f)
     except FileNotFoundError:
         print(f"Config not found: {config_path}")
@@ -172,7 +177,7 @@ def main():
                 if rc != 0:
                     sys.exit(rc)
                 try:
-                    with open(config_path) as f:
+                    with open(config_path, encoding="utf-8") as f:
                         config = json.load(f)
                 except Exception as e:
                     print(f"Could not load config after setup: {e}")

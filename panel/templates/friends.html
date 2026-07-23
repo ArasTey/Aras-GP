@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block title %}دوستان{% endblock %}
+
+{% block content %}
+<h1 class="ar-h1">{{ icon('users', 22) }} دوستان</h1>
+<p class="ar-sub">
+  هر دوست یک لینک <span class="ar-mono ar-ltr">vless://</span> جدا می‌گیرد که در
+  برنامه‌های موبایل (v2rayNG، NekoBox، Shadowrocket، sing-box) کار می‌کند.
+  سرور، همان Worker کلودفلر خودتان است — نیازی به VPS نیست.
+</p>
+
+<div class="ar-note ar-note--warn" style="margin-bottom:var(--ar-s5)">
+  {{ icon('alert', 16) }}
+  <div>
+    <b>قبل از استفاده بخوانید.</b> این قابلیت از Cloudflare Workers به‌عنوان
+    سرور VLESS استفاده می‌کند. شرایط استفاده‌ی کلودفلر پروکسی عمومی را مجاز
+    نمی‌داند و ممکن است Worker یا حساب شما محدود یا مسدود شود. مسئولیت این
+    انتخاب با خود شماست.
+  </div>
+</div>
+
+{% if not has_worker %}
+  <div class="ar-note ar-note--warn">
+    {{ icon('info', 16) }}
+    <div>
+      هنوز Worker دیپلوی نشده است. اول از صفحه‌ی
+      <a href="{{ url_for('deploy_page') }}">دیپلوی</a> یک Worker بسازید،
+      بعد اینجا برگردید.
+    </div>
+  </div>
+{% else %}
+
+<section class="ar-card ar-reveal">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('link', 18) }} لینک اشتراک</h2>
+  </div>
+  <p class="ar-card__sub">
+    یک آدرس برای همه‌ی دوستان. در برنامه‌ی موبایل به‌عنوان
+    <b>Subscription</b> اضافه شود؛ خودش لیست را به‌روز نگه می‌دارد.
+    این آدرس فقط از داخل شبکه‌ی خودتان باز می‌شود.
+  </p>
+  <div class="ar-code ar-code--cmd">
+    <div class="ar-code__bar">
+      <span class="ar-mono">Subscription URL</span>
+      <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#sub-url"
+              data-copy-label="آدرس" type="button">{{ icon('copy', 13) }}</button>
+    </div>
+    <pre id="sub-url">{{ sub_url }}</pre>
+  </div>
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('user-plus', 18) }} افزودن دوست</h2>
+  </div>
+  <div class="ar-row" style="gap:var(--ar-s3);flex-wrap:wrap">
+    <input class="ar-input" id="friend-name" placeholder="نام (مثلاً: علی)"
+           style="flex:1;min-width:180px" maxlength="40">
+    <button class="ar-btn ar-btn--primary" id="friend-add" type="button">
+      {{ icon('plus', 15) }}<span>افزودن</span>
+    </button>
+  </div>
+  <span class="ar-hint" style="margin-top:var(--ar-s3);display:block">
+    بعد از افزودن، لینک روی Worker اعمال می‌شود (اگر توکن کلودفلر ذخیره شده باشد).
+    {% if not token_saved %}
+      <b>توکن ذخیره نشده</b> — بعد از افزودن، یک بار از صفحه‌ی دیپلوی دوباره دیپلوی کنید.
+    {% endif %}
+  </span>
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('users', 18) }} فهرست</h2>
+    <span class="ar-pill">{{ clients|length }}</span>
+  </div>
+
+  {% if not clients %}
+    <p class="ar-hint">هنوز کسی اضافه نشده است.</p>
+  {% else %}
+    <div id="friend-list">
+      {% for c in clients %}
+      <div class="ar-friend" data-id="{{ c.id }}"
+           style="padding:var(--ar-s4) 0;border-bottom:1px solid var(--ar-line)">
+        <div class="ar-row" style="gap:var(--ar-s3);flex-wrap:wrap;align-items:center">
+          <b>{{ c.name }}</b>
+          {% if c.enabled %}<span class="ar-pill ar-pill--on">فعال</span>
+          {% else %}<span class="ar-pill ar-pill--off">غیرفعال</span>{% endif %}
+          <span class="ar-spacer"></span>
+          <button class="ar-btn ar-btn--ghost ar-btn--sm" data-copy="#link-{{ c.id }}"
+                  data-copy-label="لینک" type="button">{{ icon('copy', 13) }}<span>کپی لینک</span></button>
+          <button class="ar-btn ar-btn--ghost ar-btn--sm" data-friend-toggle="{{ c.id }}"
+                  data-enabled="{{ '1' if c.enabled else '0' }}" type="button">
+            {{ icon('ban', 13) }}<span>{{ 'غیرفعال' if c.enabled else 'فعال' }}</span>
+          </button>
+          <button class="ar-btn ar-btn--ghost ar-btn--sm" data-friend-rotate="{{ c.id }}" type="button">
+            {{ icon('refresh', 13) }}<span>لینک جدید</span>
+          </button>
+          <button class="ar-btn ar-btn--ghost ar-btn--sm ar-btn--danger"
+                  data-friend-delete="{{ c.id }}" type="button">
+            {{ icon('trash', 13) }}
+          </button>
+        </div>
+        <pre id="link-{{ c.id }}" class="ar-mono ar-ltr"
+             style="margin-top:var(--ar-s3);white-space:pre-wrap;word-break:break-all;font-size:11px;opacity:.75">{{ c.link }}</pre>
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function () {
+  function reload() { setTimeout(function () { location.reload(); }, 700); }
+
+  Aras.action(document.getElementById("friend-add"), function () {
+    var name = (document.getElementById("friend-name") || {}).value || "";
+    if (!name.trim()) { Aras.toast("یک نام وارد کنید.", "error"); return; }
+    return Aras.post("/api/friends/add", { name: name }).then(function (d) {
+      if (Aras.report(d)) reload();
+    });
+  });
+
+  document.querySelectorAll("[data-friend-toggle]").forEach(function (btn) {
+    Aras.action(btn, function () {
+      return Aras.post("/api/friends/update", {
+        id: btn.dataset.friendToggle,
+        enabled: btn.dataset.enabled === "1" ? "0" : "1"
+      }).then(function (d) { if (Aras.report(d)) reload(); });
+    });
+  });
+
+  document.querySelectorAll("[data-friend-rotate]").forEach(function (btn) {
+    Aras.action(btn, function () {
+      if (!confirm("لینک قبلی این دوست باطل می‌شود. ادامه؟")) return;
+      return Aras.post("/api/friends/rotate", { id: btn.dataset.friendRotate })
+        .then(function (d) { if (Aras.report(d)) reload(); });
+    });
+  });
+
+  document.querySelectorAll("[data-friend-delete]").forEach(function (btn) {
+    Aras.action(btn, function () {
+      if (!confirm("این دوست حذف شود؟")) return;
+      return Aras.post("/api/friends/delete", { id: btn.dataset.friendDelete })
+        .then(function (d) { if (Aras.report(d)) reload(); });
+    });
+  });
+})();
+</script>
+{% endblock %}
