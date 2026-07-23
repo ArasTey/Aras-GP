@@ -199,7 +199,18 @@ python -m panel
 
 ### 🪟 ویندوز
 
-**ساده‌ترین راه (یک دستور):**
+**بدون git (اگر git نصب نیست):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/ArasTey/Aras-GP/main/scripts/get-aras.ps1 | iex"
+```
+
+خودش زیپ را دانلود می‌کند، باز می‌کند و پنل را بالا می‌آورد. اگر پوشه‌ی
+`Aras-GP` از قبل باشد دست نمی‌زند (تا `config.json` و `ca\` شما پاک نشود).
+
+یا دستی: از GitHub دکمه‌ی **Code → Download ZIP**، بعد اکسترکت و `run.bat panel`.
+
+**با git:**
 
 ```bat
 git clone https://github.com/ArasTey/Aras-GP.git

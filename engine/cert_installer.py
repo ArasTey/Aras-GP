@@ -291,7 +291,7 @@ def _detect_linux_distro() -> str:
         return "arch"
     # Read /etc/os-release as fallback
     try:
-        with open("/etc/os-release") as f:
+        with open("/etc/os-release", encoding="utf-8", errors="replace") as f:
             content = f.read().lower()
         if "debian" in content or "ubuntu" in content or "mint" in content:
             return "debian"

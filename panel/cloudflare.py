@@ -165,12 +165,24 @@ def validate_script_name(name: str) -> str:
 
 
 def upload_script(token: str, account_id: str, script_name: str,
-                  source: str) -> dict:
-    """``PUT /accounts/{id}/workers/scripts/{name}`` with an ES-module payload."""
+                  source: str, vless_uuids: list[str] | None = None) -> dict:
+    """``PUT /accounts/{id}/workers/scripts/{name}`` with an ES-module payload.
+
+    ``vless_uuids`` are bound as ``VLESS_UUIDS`` so the Worker's VLESS server
+    accepts exactly the panel's friends and no one else. With none bound the
+    Worker refuses every VLESS client — it never becomes an open proxy.
+    """
+    bindings = []
+    if vless_uuids:
+        bindings.append({
+            "type": "plain_text",
+            "name": "VLESS_UUIDS",
+            "text": json.dumps(list(vless_uuids)),
+        })
     metadata = {
         "main_module": "worker.js",
         "compatibility_date": COMPATIBILITY_DATE,
-        "bindings": [],
+        "bindings": bindings,
     }
 
     files = {
@@ -196,7 +208,8 @@ def enable_workers_dev(token: str, account_id: str, script_name: str) -> bool:
     return bool((payload.get("result") or {}).get("enabled", True))
 
 
-def deploy(token: str, account_id: str, script_name: str) -> dict:
+def deploy(token: str, account_id: str, script_name: str,
+           vless_uuids: list[str] | None = None) -> dict:
     """Full deploy. Returns the public worker URL and the steps that ran."""
     account_id = (account_id or "").strip()
     if not re.fullmatch(r"[0-9a-fA-F]{32}", account_id):
@@ -220,8 +233,11 @@ def deploy(token: str, account_id: str, script_name: str) -> dict:
     record("یافتن زیردامنه", True, f"{subdomain}.workers.dev")
 
     source = render_worker(script_name, subdomain)
-    upload_script(token, account_id, script_name, source)
-    record("آپلود اسکریپت", True, f"{len(source)} بایت")
+    upload_script(token, account_id, script_name, source, vless_uuids)
+    detail = f"{len(source)} بایت"
+    if vless_uuids:
+        detail += f" + {len(vless_uuids)} کلاینت VLESS"
+    record("آپلود اسکریپت", True, detail)
 
     enable_workers_dev(token, account_id, script_name)
     record("فعال‌سازی workers.dev", True, "")

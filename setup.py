@@ -72,7 +72,7 @@ def random_auth_key(length: int = 32) -> str:
 def load_base_config() -> dict:
     if EXAMPLE_PATH.exists():
         try:
-            with EXAMPLE_PATH.open() as f:
+            with EXAMPLE_PATH.open(encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass

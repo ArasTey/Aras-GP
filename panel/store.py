@@ -48,6 +48,15 @@ DEFAULT_STATE: dict = {
     "proxy_users": [],         # mirror of config.json proxy_auth.users
     "relays": [],              # saved relays — see save_relay()
     "active_relay": None,      # id of the relay currently loaded into config
+    # VLESS-over-WebSocket sharing: the Worker doubles as a VLESS server, and
+    # each friend gets a UUID here. `path` is the WS path clients dial; the
+    # sub_token guards the subscription URL so it is not guessable.
+    "vless": {
+        "enabled": False,
+        "path": "/aras",
+        "sub_token": "",
+    },
+    "clients": [],             # friends — see clients.py
 }
 
 MAX_HISTORY = 50

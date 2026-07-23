@@ -28,8 +28,8 @@ from flask import (
 )
 
 from . import (
-    __version__, cloudflare, configgen, failover, gasgen, licensing, paths,
-    security, store, users,
+    __version__, clients, cloudflare, configgen, failover, gasgen, licensing,
+    paths, security, store, users,
 )
 from .relay_manager import (
     macos_trust_command, manager, refresh_ca_status, stale_ca_command,
@@ -595,7 +595,11 @@ def create_app() -> Flask:
 
         try:
             token = _cf_token(body)
-            result = cloudflare.deploy(token, account_id, script_name)
+            # Bind the friends' UUIDs so the redeployed Worker keeps serving
+            # their VLESS links; without this a deploy would silently revoke
+            # every friend.
+            result = cloudflare.deploy(token, account_id, script_name,
+                                       vless_uuids=clients.uuids())
         except ValueError as exc:
             return _fail(str(exc))
         except cloudflare.CloudflareError as exc:
@@ -819,6 +823,147 @@ def create_app() -> Flask:
     @security.login_required
     def api_ca_status():
         return _ok(trusted=refresh_ca_status(), command=macos_trust_command())
+
+    # ── friends (VLESS over the Worker) ───────────────────────────────
+
+    def _push_clients_to_worker() -> str:
+        """Re-upload the Worker with the current UUID set.
+
+        A Cloudflare binding can only change by re-uploading the script, so
+        every add/remove/rotate has to reach the Worker this way. Needs the
+        saved token and a prior deploy; without either, the friend is stored
+        locally and the operator is told to redeploy from the Deploy page.
+        """
+        state = store.load()
+        cf = state.get("cloudflare") or {}
+        token = cf.get("token") or ""
+        account_id = cf.get("account_id") or ""
+        script_name = cf.get("script_name") or ""
+        if not (token and account_id and script_name):
+            return ("ذخیره شد. برای اعمال روی Worker، از صفحه‌ی دیپلوی یک بار "
+                    "دوباره دیپلوی کنید (توکن ذخیره‌شده لازم است).")
+        try:
+            subdomain = cf.get("workers_subdomain") or ""
+            source = cloudflare.render_worker(script_name, subdomain)
+            cloudflare.upload_script(token, account_id, script_name, source,
+                                     vless_uuids=clients.uuids())
+        except cloudflare.CloudflareError as exc:
+            return f"روی Worker اعمال نشد: {exc.message}"
+        except Exception as exc:  # noqa: BLE001 — surface, don't 500
+            return f"روی Worker اعمال نشد: {exc}"
+        return "ذخیره و روی Worker اعمال شد."
+
+    @app.route("/friends")
+    @security.login_required
+    def friends_page():
+        cfg = clients.settings()
+        worker_url = (store.load().get("cloudflare") or {}).get("worker_url") or ""
+        base = request.host_url.rstrip("/")
+        return render_template(
+            "friends.html",
+            vless=cfg,
+            worker_url=worker_url,
+            has_worker=bool(worker_url),
+            clients=[_client_view(c) for c in clients.list_clients()],
+            sub_url=clients.subscription_url(base) if worker_url else "",
+            token_saved=bool((store.load().get("cloudflare") or {}).get("token")),
+        )
+
+    def _client_view(record: dict) -> dict:
+        return {
+            "id": record.get("id"),
+            "name": record.get("name"),
+            "uuid": record.get("uuid"),
+            "enabled": bool(record.get("enabled", True)),
+            "note": record.get("note", ""),
+            "link": clients.vless_link(record),
+        }
+
+    @app.post("/api/friends/enable")
+    @security.login_required
+    def api_friends_enable():
+        clients.set_enabled(str(_json_body().get("enabled", "")).lower()
+                            in ("1", "true", "on"))
+        return _ok()
+
+    @app.post("/api/friends/path")
+    @security.login_required
+    def api_friends_path():
+        path = clients.set_path(_json_body().get("path", ""))
+        message = "مسیر ذخیره شد. " + _push_clients_to_worker()
+        return _ok(path=path, message=message)
+
+    @app.post("/api/friends/add")
+    @security.login_required
+    def api_friends_add():
+        body = _json_body()
+        try:
+            record = clients.add_client(body.get("name", ""), body.get("note", ""))
+        except clients.ClientError as exc:
+            return _fail(str(exc))
+        message = _push_clients_to_worker()
+        return _ok(client=_client_view(record),
+                   clients=[_client_view(c) for c in clients.list_clients()],
+                   message=message)
+
+    @app.post("/api/friends/update")
+    @security.login_required
+    def api_friends_update():
+        body = _json_body()
+        enabled = body.get("enabled")
+        try:
+            clients.update_client(
+                body.get("id", ""),
+                name=body.get("name"),
+                enabled=None if enabled is None
+                else str(enabled).lower() in ("1", "true", "on"),
+                note=body.get("note"),
+            )
+        except clients.ClientError as exc:
+            return _fail(str(exc))
+        message = _push_clients_to_worker()
+        return _ok(clients=[_client_view(c) for c in clients.list_clients()],
+                   message=message)
+
+    @app.post("/api/friends/rotate")
+    @security.login_required
+    def api_friends_rotate():
+        try:
+            clients.rotate_uuid(_json_body().get("id", ""))
+        except clients.ClientError as exc:
+            return _fail(str(exc))
+        message = "شناسه‌ی جدید ساخته شد؛ لینک قبلی باطل شد. " + _push_clients_to_worker()
+        return _ok(clients=[_client_view(c) for c in clients.list_clients()],
+                   message=message)
+
+    @app.post("/api/friends/delete")
+    @security.login_required
+    def api_friends_delete():
+        try:
+            clients.delete_client(_json_body().get("id", ""))
+        except clients.ClientError as exc:
+            return _fail(str(exc))
+        message = _push_clients_to_worker()
+        return _ok(clients=[_client_view(c) for c in clients.list_clients()],
+                   message=message)
+
+    @app.get("/sub/<token>")
+    def subscription_feed(token):
+        """Public subscription — a phone app fetches this on its own timer.
+
+        No login: a phone cannot carry the panel session. The token is the
+        guard, so it is compared in constant time and a miss looks like any
+        other 404.
+        """
+        import hmac
+        expected = clients.settings()["sub_token"]
+        if not expected or not hmac.compare_digest(str(token), str(expected)):
+            return Response("not found", status=404)
+        body = clients.subscription()
+        return Response(body, mimetype="text/plain; charset=utf-8", headers={
+            "Profile-Update-Interval": "12",
+            "Cache-Control": "no-store",
+        })
 
     # ── errors ────────────────────────────────────────────────────────
 
