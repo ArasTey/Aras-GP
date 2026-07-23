@@ -1,13 +1,13 @@
-# Aras-GP Panel — additional dependencies on top of the relay's requirements.txt
+# Installing the panel on its own, without the relay engine's extras.
 #
-# Install both:
-#   pip install -r requirements.txt -r panel/requirements.txt
+# For a normal setup use the root file instead — it now carries both lists, so
+# one install gives you a working relay *and* a working panel:
+#   pip install -r requirements.txt
 
 Flask>=3.0.0
 
 # Cloudflare REST API calls (multipart Worker upload).
 requests>=2.31.0
 
-# Ed25519 licence verification and the relay's MITM CA. Already listed in the
-# root requirements.txt; repeated here so the panel can be installed alone.
+# Ed25519 licence verification and the relay's MITM CA.
 cryptography>=41.0.0
