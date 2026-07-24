@@ -136,7 +136,8 @@ def panel_port() -> int:
 
 
 def panel_host() -> str:
-    return str(load_state().get("host", DEFAULT_HOST)) or DEFAULT_HOST
+    host = load_state().get("host", DEFAULT_HOST)
+    return str(host) if host else DEFAULT_HOST
 
 
 def _chmod_600(path: Path) -> None:
