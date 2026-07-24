@@ -270,7 +270,7 @@ def stop_panel(quiet: bool = False) -> bool:
         return True
     if pid is None:
         if not quiet:
-            print(yellow("  Panel port is open but PID unknown — cannot stop safely."))
+            print(yellow("  Panel port is open but PID unknown."))
         return False
     if IS_WINDOWS:
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
@@ -395,6 +395,12 @@ def action_legacy_version() -> None:
     if was_running and _confirm("Restart the panel?", default=True):
         stop_panel(quiet=True)
         start_panel()
+
+
+def action_restart() -> None:
+    if not stop_panel(quiet=True):
+        print(yellow("  Could not stop panel cleanly. Panel may still be running."))
+    start_panel()
 
 
 def action_uninstall() -> None:
@@ -983,7 +989,7 @@ ACTIONS = {
     "4": action_uninstall,
     "5": lambda: start_panel(),
     "6": lambda: stop_panel(),
-    "7": lambda: (stop_panel(quiet=True), start_panel()),
+    "7": action_restart,
     "8": action_view_settings,
     "9": action_logs,
     "10": action_change_port,
