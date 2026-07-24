@@ -1060,6 +1060,9 @@ def menu_loop() -> None:
 
 # ── non-interactive CLI (for services and scripting) ───────────────────
 def cli(argv: list[str]) -> int:
+    if not argv:
+        print("commands: start stop restart status install version", file=sys.stderr)
+        return 2
     cmd = argv[0].lower()
     table = {
         "start": lambda: 0 if start_panel() else 1,
