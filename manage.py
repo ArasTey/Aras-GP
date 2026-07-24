@@ -181,7 +181,7 @@ def _read_pid() -> int | None:
         return None
 
 
-def _pid_alive(pid: int) -> bool:
+def _pid_alive(pid: int | None) -> bool:
     if pid is None:
         return False
     if IS_WINDOWS:
@@ -458,6 +458,8 @@ def action_change_password() -> None:
         print(red("  Password must be at least 10 characters."))
         return
     pw2 = _ask_secret("Repeat password")
+    if pw2 is None:
+        return
     if pw2 != pw1:
         print(red("  Passwords do not match."))
         return
@@ -547,7 +549,7 @@ def _enable_autostart(quiet: bool = False) -> None:
         cmd = f'"{VENV_PY}" -m panel'
         subprocess.run(["schtasks", "/create", "/tn", WIN_TASK, "/sc", "onlogon",
                         "/rl", "highest", "/f", "/tr",
-                        f'cmd /c "cd /d {ROOT} && set ARAS_PANEL_PORT={port}&& {cmd}"'],
+                        f'cmd /c "cd /d {ROOT} && set ARAS_PANEL_PORT={port} && {cmd}"'],
                        capture_output=True)
     elif IS_MAC:
         LAUNCHD_PLIST.parent.mkdir(parents=True, exist_ok=True)
@@ -616,8 +618,8 @@ def _launchd_plist(port: int, host: str) -> str:
         '<plist version="1.0"><dict>\n'
         '  <key>Label</key><string>com.aras-gp.panel</string>\n'
         '  <key>ProgramArguments</key>\n'
-        f'  <array><string>{VENV_PY}</string><string>-m</string>'
-        '<string>panel</string></array>\n'
+        f'  <array><string>{VENV_PY}</string><string>-m</string>\n'
+        '  <string>panel</string></array>\n'
         f'  <key>WorkingDirectory</key><string>{ROOT}</string>\n'
         '  <key>EnvironmentVariables</key><dict>\n'
         f'    <key>ARAS_PANEL_PORT</key><string>{port}</string>\n'
