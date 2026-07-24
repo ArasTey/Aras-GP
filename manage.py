@@ -368,8 +368,8 @@ def action_update() -> None:
     install_deps()
     print(green(f"  You are now on version {read_version()}."))
     if was_running and _confirm("Restart the panel?", default=True):
-        stop_panel(quiet=True)
-        start_panel()
+        if stop_panel(quiet=True):
+            start_panel()
 
 
 def action_legacy_version() -> None:
@@ -394,8 +394,8 @@ def action_legacy_version() -> None:
     print(green(f"  You are now on {read_version()}."))
     print(dim("  Back to latest: the 'Update' item, or 'git checkout main'."))
     if was_running and _confirm("Restart the panel?", default=True):
-        stop_panel(quiet=True)
-        start_panel()
+        if stop_panel(quiet=True):
+            start_panel()
 
 
 def action_restart() -> None:
@@ -449,8 +449,8 @@ def action_change_port() -> None:
     print(green(f"  Port set to {port}."))
     if is_running():
         if _confirm("Restart the panel to apply?", default=True):
-            stop_panel(quiet=True)
-            start_panel()
+            if stop_panel(quiet=True):
+                start_panel()
     if _autostart_installed():
         _enable_autostart(quiet=True)   # rewrite service with the new port
 
@@ -873,8 +873,8 @@ def _set_host(host: str) -> None:
     save_state(state)
     print(green(f"  Set to {host}."))
     if is_running() and _confirm("Restart the panel to apply?", default=True):
-        stop_panel(quiet=True)
-        start_panel()
+        if stop_panel(quiet=True):
+            start_panel()
     if _autostart_installed():
         _enable_autostart(quiet=True)
 
