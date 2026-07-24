@@ -361,6 +361,7 @@ def action_update() -> None:
         if _run(["git", "pull", "--ff-only"]) != 0:
             print(yellow("  Fast-forward pull failed — you may have local changes."))
             print(yellow("  Resolve it by hand, or use 'Specific version' instead."))
+            return
     else:
         print(yellow("  Git is not active here. To update, clone/download again."))
         return
@@ -1063,7 +1064,7 @@ def cli(argv: list[str]) -> int:
     table = {
         "start": lambda: 0 if start_panel() else 1,
         "stop": lambda: 0 if stop_panel() else 1,
-        "restart": lambda: (stop_panel(quiet=True), 0 if start_panel() else 1)[1],
+        "restart": lambda: 0 if (stop_panel(quiet=True) and start_panel()) else 1,
         "status": lambda: (print("running" if is_running() else "stopped"),
                            0 if is_running() else 1)[1],
         "install": lambda: 0 if install_deps() else 1,
