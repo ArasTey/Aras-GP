@@ -268,6 +268,10 @@ def stop_panel(quiet: bool = False) -> bool:
             print(yellow("  Panel is not running."))
         PID_FILE.unlink(missing_ok=True)
         return True
+    if pid is None:
+        if not quiet:
+            print(yellow("  Panel is not running."))
+        return True
     if IS_WINDOWS:
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
                        capture_output=True)
