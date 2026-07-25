@@ -160,6 +160,11 @@ class ProxyServer:
             disk_dir=config.get("cache_dir") or default_cache_dir(),
             disk_enabled=config.get("cache_enabled", True),
         )
+        # Collapses repeated identical relay failures in the log — see
+        # _log_relay_failure.
+        self._relay_err_last = ""
+        self._relay_err_at = 0.0
+        self._relay_err_count = 0
         # host -> expiry for destinations whose TLS we must not intercept:
         # certificate-pinning apps and non-TLS protocols on 443. Populated by
         # observed handshake failures, so an app teaches us once and then
@@ -361,6 +366,35 @@ class ProxyServer:
             token == h or token in h or h.endswith("." + token)
             for token in cls._TRACE_HOST_SUFFIXES
         )
+
+    #: How long identical relay failures collapse into one counted line.
+    _RELAY_ERR_WINDOW = 30.0
+
+    def _log_relay_failure(self, url: str, exc: Exception) -> None:
+        """Log a failed relay, collapsing repeats of the same cause.
+
+        A dead relay fails on every asset of every page, so logging each one
+        in full buried the explanation under hundreds of identical lines — the
+        reason this took so long to diagnose. The first occurrence of a cause
+        is logged in full; repeats within the window collapse to one counted
+        line, so the terminal stays readable without hiding that it is still
+        failing.
+        """
+        cause = str(exc)
+        now = time.monotonic()
+        first_seen = cause != self._relay_err_last
+        if first_seen or now - self._relay_err_at >= self._RELAY_ERR_WINDOW:
+            if not first_seen and self._relay_err_count > 1:
+                log.error("Relay error x%d (same cause, last %s): %s",
+                          self._relay_err_count, url[:60], cause)
+            else:
+                log.error("Relay error (%s): %s", url[:60], cause)
+            self._relay_err_last = cause
+            self._relay_err_at = now
+            self._relay_err_count = 1
+            return
+        self._relay_err_count += 1
+        log.debug("Relay error (%s): %s", url[:60], cause)
 
     def _log_response_summary(self, url: str, response: bytes):
         status, headers, body = self.fronter._split_raw_response(response)
@@ -1521,7 +1555,7 @@ class ProxyServer:
                     try:
                         response = await self._relay_smart(method, url, headers, body)
                     except Exception as e:
-                        log.error("Relay error (%s): %s", url[:60], e)
+                        self._log_relay_failure(url, e)
                         err_body = f"Relay error: {e}".encode()
                         response = (
                             b"HTTP/1.1 502 Bad Gateway\r\n"
@@ -1741,7 +1775,21 @@ class ProxyServer:
                 log.debug("Cache HIT (HTTP): %s", url[:60])
 
         if response is None:
-            response = await self._relay_smart(method, url, headers, body)
+            # Mirror the MITM path: answer a failed relay with a 502 carrying
+            # the reason. Letting this raise reached only the connection-level
+            # handler, which logs and closes — so a plain-HTTP client saw a
+            # dropped connection and never the explanation of what to fix.
+            try:
+                response = await self._relay_smart(method, url, headers, body)
+            except Exception as e:
+                self._log_relay_failure(url, e)
+                err_body = f"Relay error: {e}".encode()
+                response = (
+                    b"HTTP/1.1 502 Bad Gateway\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    b"Content-Length: " + str(len(err_body)).encode() + b"\r\n"
+                    b"\r\n" + err_body
+                )
             # Cache successful GET
             if self._cache_allowed(method, url, headers, body) and response:
                 ttl = ResponseCache.parse_ttl(response, url)

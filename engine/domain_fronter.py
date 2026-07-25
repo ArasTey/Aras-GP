@@ -148,6 +148,22 @@ class DomainFronter:
         self.last_error_at: float = 0.0
         self._last_error_log = 0.0
 
+        # Circuit breaker for a relay that is refused before it ever runs
+        # (a 401/403/404/429 from /exec — wrong permissions, stale deployment
+        # ID, or throttling). Those fail identically for every request, so
+        # without a gate one page costs a full Apps Script round trip per
+        # asset: the browser sees ~50 gateway errors, retries them, and the
+        # operator's quota is spent discovering the same thing a hundred times.
+        # After _CB_THRESHOLD consecutive refusals we answer straight away for
+        # _CB_COOLDOWN seconds, then let a single request through to probe.
+        #
+        # Only /exec-level refusals count. A site that legitimately answers 403
+        # comes back through _parse_relay_json as a normal response and must
+        # never trip this, or one broken site would take the whole relay down.
+        self._cb_failures = 0
+        self._cb_open_until = 0.0
+        self._cb_probing = False
+
         self.auth_key = config.get("auth_key", "")
         self.verify_ssl = config.get("verify_ssl", True)
         self._relay_timeout = self._cfg_float(
@@ -682,6 +698,111 @@ class DomainFronter:
          "The relay was redirected away from the script. The deployment ID is "
          "probably stale; generate a new deployment and update script_id."),
     )
+
+    #: Advice for failures that never reach Code.gs, so there is no body to
+    #: read markers out of — the /exec endpoint itself refused us. These used
+    #: to bubble up as a bare "upstream HTTP 403", which says nothing about
+    #: what the operator has to go and change.
+    _RELAY_HTTP_DIAGNOSTICS = {
+        401: ("Apps Script refused the request without running it (401). The "
+              "deployment is not public — redeploy Code.gs with 'Execute as: "
+              "Me' and 'Who has access: Anyone'."),
+        403: ("Apps Script refused the request without running it (403). "
+              "Either the deployment is not public (redeploy Code.gs with "
+              "'Execute as: Me' and 'Who has access: Anyone'), or this "
+              "deployment ID is stale — generate a new deployment and update "
+              "script_id. A 403 on every request means the relay is down, not "
+              "that the site you asked for is blocked."),
+        404: ("Apps Script has no deployment at this ID (404). The script_id "
+              "in config.json is wrong, or that deployment was deleted — "
+              "create a new deployment and update it."),
+        429: ("Google is rate-limiting this deployment (429). Add a second "
+              "script deployment (ideally on another Google account) and put "
+              "both IDs in script_id, or wait for the quota to reset."),
+        500: ("The Apps Script execution itself failed (500). Check the "
+              "project's executions log in the Apps Script editor."),
+    }
+
+    def _diagnose_relay_http_status(self, status: int) -> str:
+        """Turn a non-200 from the /exec endpoint into actionable advice."""
+        advice = self._RELAY_HTTP_DIAGNOSTICS.get(status)
+        if advice:
+            return advice
+        if 500 <= status < 600:
+            return (f"Apps Script returned HTTP {status} — a Google-side "
+                    "error. It usually clears on its own; if it does not, "
+                    "redeploy the script.")
+        return ""
+
+    def _relay_status_failure(self, status: int, sid: str) -> _RelayBadResponse:
+        """Build the exception for a non-200 /exec reply, and record why.
+
+        Routing this through `_note_relay_failure` is what keeps a dead relay
+        from writing one ERROR line per page asset: the advice is logged once a
+        minute and published to the panel's status page, instead of a few
+        hundred identical lines that say nothing actionable.
+        """
+        short = sid[-8:] if len(sid) > 8 else sid
+        detail = f"upstream HTTP {status} from script {short}"
+        advice = self._diagnose_relay_http_status(status)
+        self._note_relay_failure(detail, advice)
+        # 401/403/404 mean the deployment itself is wrong, and 429 means Google
+        # is throttling it: all four fail identically for every request, so
+        # they are worth failing fast on. A 5xx is Google flaking on one
+        # execution and often succeeds on retry, so it does not count.
+        if status in (401, 403, 404, 429):
+            self._circuit_record_refusal()
+        return _RelayBadResponse(f"{detail}{' — ' + advice if advice else ''}")
+
+    #: Consecutive /exec refusals before the breaker opens, and how long it
+    #: stays open. Three is enough to tell a dead deployment from one unlucky
+    #: request; fifteen seconds keeps a page from hanging while still noticing
+    #: a redeploy almost immediately.
+    _CB_THRESHOLD = 3
+    _CB_COOLDOWN = 15.0
+
+    def _circuit_open(self) -> bool:
+        """True when the relay is known-dead and we should not dial out.
+
+        Lets exactly one request through once the cooldown expires, so a
+        recovered relay is detected without a thundering herd of probes.
+        """
+        if not self._cb_open_until:
+            return False
+        if time.time() < self._cb_open_until:
+            return True
+        if self._cb_probing:
+            # A probe is already in flight — hold everyone else back rather
+            # than letting the whole backlog out at once.
+            return True
+        self._cb_probing = True
+        return False
+
+    def _circuit_record_success(self) -> None:
+        """A working response closes the breaker."""
+        self._cb_failures = 0
+        self._cb_open_until = 0.0
+        self._cb_probing = False
+
+    def _circuit_record_refusal(self) -> None:
+        """Count an /exec-level refusal, opening the breaker at the threshold."""
+        # A failed probe re-opens the breaker immediately: the relay is still
+        # down, so there is no point letting the next request pay for it too.
+        if self._cb_probing:
+            self._cb_probing = False
+            self._cb_open_until = time.time() + self._CB_COOLDOWN
+            return
+        self._cb_failures += 1
+        if self._cb_failures >= self._CB_THRESHOLD:
+            was_open = self._cb_open_until > time.time()
+            self._cb_open_until = time.time() + self._CB_COOLDOWN
+            if not was_open:
+                log.warning(
+                    "Relay circuit opened for %.0fs after %d refusals — "
+                    "failing fast instead of retrying. %s",
+                    self._CB_COOLDOWN, self._cb_failures,
+                    self.last_error or "see the panel status page",
+                )
 
     def _diagnose_relay_body(self, text: str) -> str:
         """Turn an Apps Script failure page into an actionable sentence."""
@@ -1809,6 +1930,13 @@ class DomainFronter:
 
     async def _relay_with_retry(self, payload: dict) -> bytes:
         """Single relay with one retry on failure. Uses H2 if available."""
+        # Every relay funnels through here, so this is the one place the
+        # breaker has to be checked to spare a known-dead relay the round trip.
+        if self._circuit_open():
+            raise _RelayBadResponse(
+                self.last_error
+                or "Relay is unavailable — see the panel status page.",
+            )
         attempts = self._retry_attempts_for_payload(payload)
         host_key = self._host_key(payload.get("u"))
         tried_sids: set[str] = set()
@@ -1974,10 +2102,7 @@ class DomainFronter:
         )
 
         if status != 200:
-            raise _RelayBadResponse(
-                f"upstream HTTP {status} from script "
-                f"{sid[-8:] if len(sid) > 8 else sid}",
-            )
+            raise self._relay_status_failure(status, sid)
         return self._parse_or_raise(body)
 
     async def _relay_single_h2_with_sid(self, payload: dict,
@@ -2047,10 +2172,7 @@ class DomainFronter:
 
             await self._release(reader, writer, created)
             if status != 200:
-                raise _RelayBadResponse(
-                    f"upstream HTTP {status} from script "
-                    f"{sid[-8:] if len(sid) > 8 else sid}",
-                )
+                raise self._relay_status_failure(status, sid)
             return self._parse_or_raise(resp_body)
 
         except Exception:
@@ -2360,8 +2482,11 @@ class DomainFronter:
             )
 
         # A parsed response means the chain works; stop reporting a stale
-        # failure on the status page.
+        # failure on the status page and close the breaker. This is the one
+        # point every relay path converges on, so hooking recovery here covers
+        # H2, H1, fan-out and batch alike.
         self.last_error = ""
+        self._circuit_record_success()
 
         status = data.get("s", 200)
         resp_headers = data.get("h", {})

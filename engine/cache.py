@@ -71,6 +71,34 @@ def default_cache_dir() -> str:
 _STRIP_ON_STORE = (b"set-cookie", b"set-cookie2")
 
 
+def response_status(raw_response: bytes) -> int:
+    """The numeric status of a raw HTTP response, or 0 if it is unparseable.
+
+    Parses the status line properly rather than searching the head for a
+    literal ``HTTP/1.1 200``: that older check missed ``HTTP/1.0`` and
+    ``HTTP/2`` replies, which quietly made every one of them uncacheable.
+    """
+    line_end = raw_response.find(b"\r\n")
+    line = raw_response[:line_end if line_end > 0 else 64]
+    parts = line.split(b" ", 2)
+    if len(parts) < 2 or not parts[0].upper().startswith(b"HTTP/"):
+        return 0
+    try:
+        return int(parts[1])
+    except ValueError:
+        return 0
+
+
+def is_cacheable_status(raw_response: bytes) -> bool:
+    """True only for a plain 200.
+
+    Everything else is refused on purpose. 4xx/5xx are failures and caching
+    one would keep replaying it after the cause was fixed; 206 is a fragment
+    that would be served as if it were the whole body; 304 carries no body.
+    """
+    return response_status(raw_response) == 200
+
+
 def strip_uncacheable_headers(raw_response: bytes) -> bytes:
     """Remove per-client headers so a response is safe to store and replay."""
     split = raw_response.find(b"\r\n\r\n")
@@ -204,6 +232,13 @@ class ResponseCache:
 
     def put_async(self, url: str, raw_response: bytes, ttl: int = 300):
         """Write through to both tiers. The disk write is fire-and-forget."""
+        # Last line of defence against storing a failure. `parse_ttl` already
+        # refuses non-200s, but it is advisory — a caller is free to pass its
+        # own ttl, and caching one 502 would keep serving that error long after
+        # the relay recovered, with no way for the user to shake it loose.
+        # Enforcing it here means no future call site can reintroduce that.
+        if not is_cacheable_status(raw_response):
+            return
         raw_response = strip_uncacheable_headers(raw_response)
         self.put(url, raw_response, ttl)
         if not self.disk_enabled or ttl <= 0:
@@ -311,8 +346,8 @@ class ResponseCache:
             return 0
         hdr = raw_response[:hdr_end].decode(errors="replace").lower()
 
-        # Don't cache errors or non-200
-        if b"HTTP/1.1 200" not in raw_response[:20]:
+        # Don't cache errors, partials or non-200 of any kind.
+        if not is_cacheable_status(raw_response):
             return 0
         # ``no-store`` is absolute. ``private`` excludes shared caches, and
         # this one is shared the moment lan_sharing is on, so honour it.
