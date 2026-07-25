@@ -914,18 +914,24 @@ def create_app() -> Flask:
         """Re-upload the Worker with the current UUID set.
 
         A Cloudflare binding can only change by re-uploading the script, so
-        every add/remove/rotate has to reach the Worker this way. Needs the
-        saved token and a prior deploy; without either, the friend is stored
-        locally and the operator is told to redeploy from the Deploy page.
+        every add/remove/rotate has to reach the Worker this way. Needs a token
+        and a prior deploy; without either, the friend is stored locally and
+        the operator is told to redeploy from the Deploy page.
+
+        The token is taken from the session as well as from disk. Reading only
+        the saved one meant that with "remember token" off — the default — a new
+        friend never reached the Worker, which then answered their config with
+        "not configured" and looked like the link itself was wrong.
         """
         state = store.load()
         cf = state.get("cloudflare") or {}
-        token = cf.get("token") or ""
+        token = _cf_token_quiet()
         account_id = cf.get("account_id") or ""
         script_name = cf.get("script_name") or ""
         if not (token and account_id and script_name):
-            return ("ذخیره شد. برای اعمال روی Worker، از صفحه‌ی دیپلوی یک بار "
-                    "دوباره دیپلوی کنید (توکن ذخیره‌شده لازم است).")
+            return ("ذخیره شد، ولی روی Worker اعمال نشد چون توکن کلودفلر در "
+                    "دست نیست. از صفحه‌ی دیپلوی یک بار دوباره دیپلوی کنید تا "
+                    "این دوست برای Worker شناخته شود.")
         try:
             subdomain = cf.get("workers_subdomain") or ""
             source = cloudflare.render_worker(script_name, subdomain)
@@ -976,6 +982,28 @@ def create_app() -> Flask:
         path = clients.set_path(_json_body().get("path", ""))
         message = "مسیر ذخیره شد. " + _push_clients_to_worker()
         return _ok(path=path, message=message)
+
+    @app.post("/api/friends/transport")
+    @security.login_required
+    def api_friends_transport():
+        """Clean address, ALPN and TLS fingerprint for the generated configs.
+
+        None of these change the Worker, only the links handed out, so there is
+        no redeploy: Cloudflare routes on SNI and Host, and those still name the
+        Worker. Only the address a client dials moves.
+        """
+        body = _json_body()
+        try:
+            cfg = clients.set_transport(
+                clean_address=body.get("clean_address"),
+                alpn=body.get("alpn"),
+                fingerprint=body.get("fingerprint"),
+            )
+        except clients.ClientError as exc:
+            return _fail(str(exc))
+        where = cfg["clean_address"] or "نشانی خود Worker"
+        return _ok(settings=cfg,
+                   message=f"ذخیره شد. کانفیگ‌ها به {where} وصل می‌شوند.")
 
     @app.post("/api/friends/add")
     @security.login_required

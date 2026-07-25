@@ -22,6 +22,7 @@ reads and writes only the panel state through :mod:`store`.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import re
 import secrets
 import time
@@ -66,6 +67,9 @@ def settings() -> dict:
     return {
         "enabled": bool(section.get("enabled")),
         "path": _normalize_path(section.get("path")),
+        "clean_address": normalize_clean_address(section.get("clean_address")),
+        "alpn": normalize_alpn(section.get("alpn")),
+        "fingerprint": normalize_fingerprint(section.get("fingerprint")),
         "sub_token": section.get("sub_token", ""),
     }
 
@@ -94,6 +98,93 @@ def _normalize_path(path) -> str:
     if not re.fullmatch(r"/[\w\-./]{0,63}", path):
         return DEFAULT_PATH
     return path
+
+
+# ── clean-address routing ──────────────────────────────────────────────
+# Cloudflare routes by SNI and Host, not by which of its edge IPs the TCP
+# connection landed on. So the address a client dials can be any Cloudflare
+# edge that the network in question has not blocked, while sni/host stay the
+# Worker's own hostname and the request still arrives at the Worker.
+#
+# That is the whole "clean IP" technique: the edge is chosen for reachability,
+# the hostname for routing. Which edges are reachable differs by network and
+# changes over time, so the address is entered by the operator rather than
+# guessed here.
+
+#: ALPN values worth offering. WebSocket runs over HTTP/1.1, so that is the
+#: default; h2 is accepted because some clients negotiate it successfully and
+#: it can be harder to fingerprint.
+_ALPN_CHOICES = ("http/1.1", "h2,http/1.1", "h2")
+
+#: uTLS ClientHello fingerprints the common clients implement.
+_FP_CHOICES = ("chrome", "firefox", "safari", "ios", "android", "edge",
+               "randomized")
+
+
+def normalize_clean_address(value) -> str:
+    """An IPv4/IPv6 literal or hostname to dial instead of the Worker's name.
+
+    Empty means "use the Worker's hostname", which is the previous behaviour.
+    Rejected rather than corrected when malformed: a silently-dropped address
+    would look like the setting had been applied and left the operator
+    debugging why nothing changed.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    # Strip a scheme or trailing path if pasted from a browser bar.
+    text = re.sub(r"^[a-zA-Z][\w+.-]*://", "", text).split("/")[0].strip()
+    if not text:
+        return ""
+    # Bracketed IPv6, as it appears in a URL.
+    if text.startswith("[") and text.endswith("]"):
+        inner = text[1:-1]
+        try:
+            ipaddress.IPv6Address(inner)
+            return text
+        except ValueError:
+            return ""
+    try:
+        ipaddress.ip_address(text)
+        return text
+    except ValueError:
+        pass
+    # A hostname: a clean *domain* fronting Cloudflare is as valid as an IP.
+    if len(text) <= 253 and re.fullmatch(
+            r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*",
+            text):
+        return text.lower()
+    return ""
+
+
+def normalize_alpn(value) -> str:
+    text = str(value or "").strip().lower().replace(" ", "")
+    return text if text in _ALPN_CHOICES else _ALPN_CHOICES[0]
+
+
+def normalize_fingerprint(value) -> str:
+    text = str(value or "").strip().lower()
+    return text if text in _FP_CHOICES else "chrome"
+
+
+def set_transport(clean_address=None, alpn=None, fingerprint=None) -> dict:
+    """Update the transport knobs. Only the arguments given are touched."""
+    section = _vless_settings()
+    if clean_address is not None:
+        raw = str(clean_address).strip()
+        normalized = normalize_clean_address(raw)
+        if raw and not normalized:
+            raise ClientError(
+                "نشانی تمیز نامعتبر است. یک IP (مثل 104.16.0.1) یا یک دامنه "
+                "وارد کنید."
+            )
+        section["clean_address"] = normalized
+    if alpn is not None:
+        section["alpn"] = normalize_alpn(alpn)
+    if fingerprint is not None:
+        section["fingerprint"] = normalize_fingerprint(fingerprint)
+    store.update(vless=section)
+    return settings()
 
 
 # ── the client list ────────────────────────────────────────────────────
@@ -179,17 +270,29 @@ def _worker_host() -> str:
     return urlparse(url).hostname or ""
 
 
-def vless_link(client: dict, host: str = "", path: str = "") -> str:
+def vless_link(client: dict, host: str = "", path: str = "",
+               address: str = "") -> str:
     """A ``vless://`` share link for one client.
 
-    ws + TLS to the Worker's own domain, with host and SNI set to it too, which
-    is exactly what a ``workers.dev`` deployment terminates. The fragment is the
-    friend's name, so it shows up labelled in their app.
+    ws + TLS, with ``sni`` and ``host`` set to the Worker's own hostname —
+    that is what terminates the TLS and what Cloudflare routes on.
+
+    The dialled address is separate. When a clean address is configured the
+    client connects to that edge instead of resolving the Worker's name, which
+    is what gets through a network that blocks ``workers.dev`` at the DNS or IP
+    level. Cloudflare still delivers it to this Worker, because routing is by
+    SNI and Host rather than by which edge answered.
+
+    The fragment is the friend's name, so it shows up labelled in their app.
     """
     host = host or _worker_host()
     if not host or not client.get("uuid"):
         return ""
-    path = _normalize_path(path or settings()["path"])
+    conf = settings()
+    path = _normalize_path(path or conf["path"])
+    # An explicit argument wins, then the configured one, then the hostname —
+    # so nothing changes for an operator who never sets a clean address.
+    dial = normalize_clean_address(address) or conf["clean_address"] or host
     query = (
         "encryption=none"
         "&security=tls"
@@ -197,10 +300,11 @@ def vless_link(client: dict, host: str = "", path: str = "") -> str:
         "&type=ws"
         "&host=" + quote(host) +
         "&path=" + quote(path, safe="") +
-        "&fp=chrome"
+        "&alpn=" + quote(conf["alpn"], safe="") +
+        "&fp=" + quote(conf["fingerprint"])
     )
     label = quote(client.get("name") or "aras", safe="")
-    return f"vless://{client['uuid']}@{host}:443?{query}#{label}"
+    return f"vless://{client['uuid']}@{dial}:443?{query}#{label}"
 
 
 def all_links(host: str = "", path: str = "") -> list[str]:

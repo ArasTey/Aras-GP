@@ -52,6 +52,53 @@
 
 <section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
   <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('globe', 18) }} نشانی اتصال (IP تمیز)</h2>
+  </div>
+  <p class="ar-card__sub">
+    کلادفلر بر اساس <b>SNI</b> و <b>Host</b> مسیریابی می‌کند، نه بر اساس اینکه
+    اتصال به کدام IP لبه‌اش رسیده. پس می‌شود کانفیگ را به هر IP یا دامنه‌ی
+    تمیزی وصل کرد و همچنان به Worker خودتان برسد. این همان تکنیک «IP تمیز» است.
+    خالی بگذارید تا مثل قبل به نشانی خودِ Worker وصل شود.
+  </p>
+
+  <div class="ar-row" style="gap:var(--ar-s3);flex-wrap:wrap;align-items:flex-end">
+    <label class="ar-field" style="flex:2;min-width:220px">
+      <span class="ar-label">IP یا دامنه‌ی تمیز</span>
+      <input class="ar-input ar-ltr ar-mono" id="clean-address"
+             placeholder="104.16.0.1" value="{{ vless.clean_address }}"
+             maxlength="253" dir="ltr">
+    </label>
+    <label class="ar-field" style="min-width:150px">
+      <span class="ar-label">ALPN</span>
+      <select class="ar-input ar-ltr" id="alpn" dir="ltr">
+        {% for opt in ['http/1.1', 'h2,http/1.1', 'h2'] %}
+        <option value="{{ opt }}" {{ 'selected' if vless.alpn == opt }}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="ar-field" style="min-width:150px">
+      <span class="ar-label">اثر انگشت TLS</span>
+      <select class="ar-input ar-ltr" id="fingerprint" dir="ltr">
+        {% for opt in ['chrome','firefox','safari','ios','android','edge','randomized'] %}
+        <option value="{{ opt }}" {{ 'selected' if vless.fingerprint == opt }}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="ar-btn ar-btn--primary" id="transport-save" type="button">
+      {{ icon('check', 15) }}<span>ذخیره</span>
+    </button>
+  </div>
+
+  <span class="ar-hint" style="margin-top:var(--ar-s3);display:block">
+    IPهای لبه‌ی کلادفلر از شبکه‌ای به شبکه‌ی دیگر فرق می‌کنند و با زمان عوض
+    می‌شوند — یکی جواب می‌دهد و بعدی نه. چند تا را تست کنید و آن که سریع‌تر
+    بود بگذارید. تغییر این فیلدها فقط لینک‌ها را عوض می‌کند و نیازی به دیپلوی
+    مجدد ندارد.
+  </span>
+</section>
+
+<section class="ar-card ar-reveal" style="margin-top:var(--ar-s5)">
+  <div class="ar-card__head">
     <h2 class="ar-card__title">{{ icon('user-plus', 18) }} افزودن دوست</h2>
   </div>
   <div class="ar-row" style="gap:var(--ar-s3);flex-wrap:wrap">
@@ -121,6 +168,18 @@
     var name = (document.getElementById("friend-name") || {}).value || "";
     if (!name.trim()) { Aras.toast("یک نام وارد کنید.", "error"); return; }
     return Aras.post("/api/friends/add", { name: name }).then(function (d) {
+      if (Aras.report(d)) reload();
+    });
+  });
+
+  Aras.action(document.getElementById("transport-save"), function () {
+    return Aras.post("/api/friends/transport", {
+      clean_address: (document.getElementById("clean-address") || {}).value || "",
+      alpn: (document.getElementById("alpn") || {}).value || "",
+      fingerprint: (document.getElementById("fingerprint") || {}).value || ""
+    }).then(function (d) {
+      // Reload so every link and QR on the page is regenerated with the new
+      // address — leaving the old ones visible would hand out stale configs.
       if (Aras.report(d)) reload();
     });
   });
