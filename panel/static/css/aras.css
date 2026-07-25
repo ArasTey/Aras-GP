@@ -1064,3 +1064,63 @@ h1, h2, h3, h4 { margin: 0; font-weight: 700; letter-spacing: -0.015em; line-hei
   .ar-main { margin: 0; padding: 0; }
   .ar-card { border: 1px solid #ccc; box-shadow: none; backdrop-filter: none; }
 }
+
+/* ── Quota meters ──────────────────────────────────────────────────────
+   Two bars for the two ceilings a relay runs into. The fill is coloured by
+   how much is left rather than by which service it is: at a glance the
+   question is "am I about to run out", not "which vendor is this". */
+.ar-quota { display: flex; flex-direction: column; gap: var(--ar-s5); }
+
+.ar-quota__row { display: flex; flex-direction: column; gap: var(--ar-s2); }
+
+.ar-quota__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--ar-s3);
+}
+
+.ar-quota__name {
+  display: flex; align-items: center; gap: var(--ar-s2);
+  font-weight: 600; color: var(--ar-ink);
+}
+
+.ar-quota__count { font-variant-numeric: tabular-nums; color: var(--ar-ink-dim); }
+.ar-quota__count b { color: var(--ar-ink); font-weight: 600; }
+
+.ar-quota__track {
+  position: relative; height: 10px; border-radius: 999px; overflow: hidden;
+  background: var(--ar-glass-soft);
+  box-shadow: inset 0 0 0 1px var(--ar-hairline);
+}
+
+.ar-quota__fill {
+  height: 100%; border-radius: 999px; width: 0;
+  background: linear-gradient(90deg, var(--ar-mint-500), var(--ar-mint-400));
+  transition: width .55s cubic-bezier(.22, .8, .28, 1), background .35s ease;
+}
+
+/* Thresholds are on the *used* fraction, so the colour shifts as it fills. */
+.ar-quota__fill--warn {
+  background: linear-gradient(90deg, var(--ar-amber-500), var(--ar-amber-400));
+}
+.ar-quota__fill--crit {
+  background: linear-gradient(90deg, var(--ar-rose-500), var(--ar-rose-400));
+}
+.ar-quota__fill--idle { background: var(--ar-hairline-bright); }
+
+.ar-quota__foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--ar-s3); font-size: .82rem; color: var(--ar-ink-faint);
+}
+
+/* A measured number and an estimated one must not look equally certain. */
+.ar-quota__src {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px; border-radius: 999px; font-size: .72rem;
+  border: 1px solid var(--ar-hairline);
+}
+.ar-quota__src--live { color: var(--ar-mint-400); }
+.ar-quota__src--local { color: var(--ar-ink-faint); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ar-quota__fill { transition: none; }
+}

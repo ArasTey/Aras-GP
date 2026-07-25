@@ -129,6 +129,55 @@
   </article>
 </section>
 
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('chart', 18) }} سهمیه‌ی امروز</h2>
+    <span class="ar-hint" id="quota-refresh">—</span>
+  </div>
+
+  <div class="ar-quota">
+    <div class="ar-quota__row">
+      <div class="ar-quota__head">
+        <span class="ar-quota__name">Google Apps Script</span>
+        <span class="ar-quota__count">
+          <b id="q-g-used">—</b> / <span id="q-g-limit">—</span>
+        </span>
+      </div>
+      <div class="ar-quota__track">
+        <div class="ar-quota__fill ar-quota__fill--idle" id="q-g-fill"></div>
+      </div>
+      <div class="ar-quota__foot">
+        <span id="q-g-note">در حال خواندن…</span>
+        <span class="ar-quota__src ar-quota__src--local" id="q-g-src">
+          شمارش محلی
+        </span>
+      </div>
+    </div>
+
+    <div class="ar-quota__row">
+      <div class="ar-quota__head">
+        <span class="ar-quota__name">Cloudflare Workers</span>
+        <span class="ar-quota__count">
+          <b id="q-c-used">—</b> / <span id="q-c-limit">—</span>
+        </span>
+      </div>
+      <div class="ar-quota__track">
+        <div class="ar-quota__fill ar-quota__fill--idle" id="q-c-fill"></div>
+      </div>
+      <div class="ar-quota__foot">
+        <span id="q-c-note">در حال خواندن…</span>
+        <span class="ar-quota__src ar-quota__src--local" id="q-c-src">—</span>
+      </div>
+    </div>
+  </div>
+
+  <p class="ar-hint" style="margin:var(--ar-s4) 0 0">
+    هر دو سرویس با <b>تعداد درخواست</b> محدود می‌کنند، نه حجم. گوگل راهی برای
+    خواندن سهمیه‌ی باقی‌مانده منتشر نکرده، پس نوار بالا شمارش همین رله است و
+    مصرف بیرون از آن را نمی‌بیند.
+  </p>
+</section>
+
 <section class="ar-card ar-reveal">
   <div class="ar-card__head">
     <h2 class="ar-card__title">{{ icon('globe', 18) }} پرترافیک‌ترین میزبان‌ها</h2>
@@ -263,6 +312,92 @@
 
   // Stopped relay: nothing changes, so poll a third as often.
   Aras.poll(tick, 5000, { isIdle: function () { return !relayRunning; } });
+
+  // ── Quota meters ───────────────────────────────────────────────────
+  var q = {
+    gUsed: document.getElementById("q-g-used"),
+    gLimit: document.getElementById("q-g-limit"),
+    gFill: document.getElementById("q-g-fill"),
+    gNote: document.getElementById("q-g-note"),
+    cUsed: document.getElementById("q-c-used"),
+    cLimit: document.getElementById("q-c-limit"),
+    cFill: document.getElementById("q-c-fill"),
+    cNote: document.getElementById("q-c-note"),
+    cSrc: document.getElementById("q-c-src"),
+    stamp: document.getElementById("quota-refresh")
+  };
+
+  // Colour by how full it is, so the bar answers "am I about to run out"
+  // without the reader having to compare two numbers.
+  function fillClass(pct, known) {
+    if (!known) return "ar-quota__fill ar-quota__fill--idle";
+    if (pct >= 90) return "ar-quota__fill ar-quota__fill--crit";
+    if (pct >= 70) return "ar-quota__fill ar-quota__fill--warn";
+    return "ar-quota__fill";
+  }
+
+  function setBar(fillEl, used, limit, known) {
+    var pct = (known && limit > 0) ? Math.min(100, (used / limit) * 100) : 0;
+    fillEl.className = fillClass(pct, known);
+    // Keep a sliver visible once anything has been spent, so "barely used"
+    // does not render identically to "nothing here".
+    fillEl.style.width = (known && pct > 0 && pct < 1.5 ? 1.5 : pct) + "%";
+  }
+
+  function hours(seconds) {
+    if (!seconds || seconds < 0) return "";
+    var h = Math.floor(seconds / 3600);
+    var m = Math.round((seconds % 3600) / 60);
+    if (h > 0) return h + " ساعت و " + m + " دقیقه";
+    return m + " دقیقه";
+  }
+
+  function renderQuota(data) {
+    var g = data.google || {};
+    var gKnown = typeof g.used === "number" && g.limit > 0;
+    q.gUsed.textContent = gKnown ? Aras.number(g.used) : "—";
+    q.gLimit.textContent = gKnown ? Aras.number(g.limit) : "—";
+    setBar(q.gFill, g.used || 0, g.limit || 0, gKnown);
+    if (!gKnown) {
+      q.gNote.textContent = "رله خاموش است.";
+    } else {
+      var left = Aras.number(g.remaining) + " فراخوان باقی";
+      var refill = hours(g.next_refill_in_s);
+      q.gNote.textContent = refill
+        ? left + " · تجدید تدریجی تا " + refill + " دیگر"
+        : left;
+    }
+
+    var c = data.cloudflare || {};
+    var cKnown = c.available === true && c.limit > 0;
+    q.cUsed.textContent = cKnown ? Aras.number(c.used) : "—";
+    q.cLimit.textContent = cKnown ? Aras.number(c.limit) : "—";
+    setBar(q.cFill, c.used || 0, c.limit || 0, cKnown);
+    if (cKnown) {
+      q.cNote.textContent =
+        Aras.number(Math.max(0, c.limit - c.used)) + " درخواست باقی (۲۴ ساعت اخیر)";
+      q.cSrc.textContent = "از API کلودفلر";
+      q.cSrc.className = "ar-quota__src ar-quota__src--live";
+    } else {
+      q.cNote.textContent = c.reason || "در دسترس نیست.";
+      q.cSrc.textContent = "بدون داده";
+      q.cSrc.className = "ar-quota__src ar-quota__src--local";
+    }
+
+    q.stamp.textContent = "به‌روزرسانی " +
+      new Date().toLocaleTimeString("fa-IR");
+  }
+
+  function quotaTick() {
+    return Aras.api("/api/quota").then(function (data) {
+      if (data && data.ok) renderQuota(data);
+    });
+  }
+
+  quotaTick();
+  // Cloudflare's analytics API is rate limited and the numbers move slowly,
+  // so this is deliberately far slower than the 5 s stats poll.
+  Aras.poll(quotaTick, 60000);
 
   Aras.action(document.getElementById("btn-test"), function () {
     return Aras.post("/api/relay/test").then(function (result) {

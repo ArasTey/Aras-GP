@@ -357,6 +357,53 @@ def create_app() -> Flask:
             "account_totals": stats["account_totals"],
         })
 
+    @app.get("/api/quota")
+    @security.login_required
+    def api_quota():
+        """Daily headroom on both legs of the relay.
+
+        The two halves come from genuinely different places and the UI says so:
+        Google publishes no endpoint for remaining Apps Script quota, so that
+        side is what this relay has spent since it started and undercounts
+        anything used elsewhere or before a restart. Cloudflare does report
+        usage, so that side is read from their analytics API.
+        """
+        stats = manager.stats()
+        google = stats.get("quota") or {}
+
+        cf_state = store.load().get("cloudflare") or {}
+        token = (cf_state.get("token") or "").strip()
+        account = (cf_state.get("account_id") or "").strip()
+        script = (cf_state.get("script_name") or "").strip()
+        cf = {
+            "available": False,
+            "reason": "",
+            "used": 0,
+            "limit": cloudflare.WORKERS_FREE_DAILY_REQUESTS,
+        }
+        if not token or not account:
+            cf["reason"] = (
+                "توکن یا شناسه‌ی حساب ذخیره نشده — آمار کلودفلر در دسترس نیست."
+            )
+        else:
+            try:
+                usage = cloudflare.workers_usage(token, account, script)
+                cf.update(
+                    available=True,
+                    used=usage["script_requests"],
+                    account_used=usage["requests"],
+                    errors=usage["errors"],
+                    since=usage["since"],
+                )
+            except cloudflare.CloudflareError as exc:
+                # Analytics needs a permission a deploy-only token lacks, so
+                # this is an expected outcome, not a panel failure.
+                cf["reason"] = str(exc)
+            except Exception:
+                log.exception("Unexpected error reading Cloudflare usage")
+                cf["reason"] = "خطای غیرمنتظره هنگام خواندن آمار."
+        return _ok(google=google, cloudflare=cf)
+
     @app.get("/api/status")
     @security.login_required
     def api_status():

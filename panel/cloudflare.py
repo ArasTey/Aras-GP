@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -28,8 +30,14 @@ from . import paths
 log = logging.getLogger("panel.cloudflare")
 
 API_BASE = "https://api.cloudflare.com/client/v4"
+GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql"
 TIMEOUT = 30
 COMPATIBILITY_DATE = "2024-11-01"
+
+#: Free-plan Workers ceiling. Cloudflare does not report the plan's limit
+#: through the API, only the usage, so the limit is carried here and can be
+#: overridden for a paid account (where requests are uncapped anyway).
+WORKERS_FREE_DAILY_REQUESTS = 100_000
 
 SCRIPT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$")
 
@@ -124,6 +132,90 @@ def list_scripts(token: str, account_id: str) -> list[dict]:
     ]
 
 
+def workers_usage(token: str, account_id: str,
+                  script_name: str = "") -> dict:
+    """Requests this account's Workers have served in the last 24 hours.
+
+    Read from the GraphQL analytics API, which is the only place Cloudflare
+    reports it — the REST endpoints expose deployments, not usage. The plan's
+    ceiling is not part of the answer, so it is supplied by the caller.
+
+    Raises CloudflareError like the rest of this module; analytics needs its
+    own token permission, so a token minted only for deploying will be refused
+    here and the caller should treat that as "unknown", not as a failure.
+    """
+    since = (datetime.now(timezone.utc) - timedelta(hours=24))
+    query = """
+    query Usage($account: String!, $since: Time!) {
+      viewer {
+        accounts(filter: {accountTag: $account}) {
+          workersInvocationsAdaptive(
+            limit: 10000
+            filter: {datetime_geq: $since}
+          ) {
+            sum { requests errors }
+            dimensions { scriptName }
+          }
+        }
+      }
+    }
+    """
+    body = {
+        "query": query,
+        "variables": {
+            "account": account_id,
+            "since": since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+    }
+    try:
+        response = requests.post(
+            GRAPHQL_URL, headers=_headers(token), json=body, timeout=TIMEOUT,
+        )
+    except requests.Timeout:
+        raise CloudflareError("اتصال به Cloudflare در زمان مقرر پاسخ نداد.")
+    except requests.RequestException as exc:
+        log.warning("Cloudflare analytics request failed: %s",
+                    exc.__class__.__name__)
+        raise CloudflareError("اتصال به Cloudflare برقرار نشد.")
+
+    try:
+        payload = response.json()
+    except ValueError:
+        raise CloudflareError(
+            f"پاسخ نامعتبر از Cloudflare (کد {response.status_code})."
+        )
+
+    # GraphQL reports failures in an `errors` list with HTTP 200, so the
+    # status code alone would read as success.
+    if payload.get("errors"):
+        detail = "; ".join(
+            str(e.get("message", "")) for e in payload["errors"]
+        ) or "unknown"
+        raise CloudflareError(
+            f"Cloudflare آمار را نداد — {detail}", payload["errors"],
+        )
+
+    accounts = (((payload.get("data") or {}).get("viewer") or {})
+                .get("accounts") or [])
+    rows = accounts[0].get("workersInvocationsAdaptive", []) if accounts else []
+
+    total = errors = mine = 0
+    for row in rows:
+        sums = row.get("sum") or {}
+        requests_n = int(sums.get("requests") or 0)
+        total += requests_n
+        errors += int(sums.get("errors") or 0)
+        if script_name and (row.get("dimensions") or {}).get(
+                "scriptName") == script_name:
+            mine += requests_n
+    return {
+        "requests": total,
+        "errors": errors,
+        "script_requests": mine if script_name else total,
+        "since": since.isoformat(timespec="seconds"),
+    }
+
+
 # ── worker source ─────────────────────────────────────────────────────
 
 
@@ -197,6 +289,115 @@ def upload_script(token: str, account_id: str, script_name: str,
     result = payload.get("result") or {}
     log.info("Worker '%s' uploaded (%d bytes of source)", script_name, len(source))
     return result
+
+
+def _subdomain_candidates(account_name: str, script_name: str) -> list[str]:
+    """Names to try for a new workers.dev subdomain, best first.
+
+    It has to be globally unique across every Cloudflare account, so a single
+    guess is not enough. Derived from the account name where there is one, so
+    the operator recognises what appeared on their dashboard, with random
+    suffixes behind it rather than anything guessable from their identity.
+    """
+    base = re.sub(r"[^a-z0-9-]+", "-", (account_name or "").lower()).strip("-")
+    base = re.sub(r"-{2,}", "-", base)[:40].strip("-")
+    seeds = [s for s in (base, script_name) if s]
+    out: list[str] = []
+    for seed in seeds:
+        seed = seed.strip("-")[:50]
+        if SCRIPT_NAME_RE.match(seed) and seed not in out:
+            out.append(seed)
+    for seed in (seeds or ["aras"]):
+        for _ in range(4):
+            suffix = secrets.token_hex(3)
+            candidate = f"{seed.strip('-')[:50]}-{suffix}"
+            if SCRIPT_NAME_RE.match(candidate):
+                out.append(candidate)
+    return out
+
+
+def create_workers_subdomain(token: str, account_id: str, name: str) -> str:
+    """Claim ``name.workers.dev`` for this account. Returns the name taken."""
+    payload = _call(
+        "PUT", f"/accounts/{account_id}/workers/subdomain", token,
+        json={"subdomain": name},
+    )
+    got = (payload.get("result") or {}).get("subdomain") or name
+    log.info("Created workers.dev subdomain '%s'", got)
+    return got
+
+
+def ensure_workers_subdomain(token: str, account_id: str,
+                             script_name: str = "aras") -> tuple[str, bool]:
+    """The account's workers.dev subdomain, creating one if it has none.
+
+    Cloudflare only creates it when the dashboard's Workers page is opened, so
+    an account that has never been there fails a deploy with error 10007 and a
+    link to go and click. Doing it over the API removes that detour.
+
+    Returns ``(subdomain, created)`` so the caller can tell the operator when a
+    public name was claimed on their behalf — it is account-wide and shows on
+    their dashboard, so it should never appear silently.
+    """
+    try:
+        existing = get_workers_subdomain(token, account_id)
+        if existing:
+            return existing, False
+    except CloudflareError as exc:
+        # 10007 is "no subdomain yet", which is the case this exists to fix.
+        # Anything else — a bad token, no permission — must not be papered over
+        # by trying to create one.
+        if not _is_missing_subdomain(exc):
+            raise
+
+    account_name = ""
+    try:
+        for acct in list_accounts(token):
+            if acct.get("id") == account_id:
+                account_name = acct.get("name") or ""
+                break
+    except CloudflareError:
+        # Listing needs a permission the token may not have; the fallback
+        # candidates do not depend on it.
+        pass
+
+    last: CloudflareError | None = None
+    for candidate in _subdomain_candidates(account_name, script_name):
+        try:
+            return create_workers_subdomain(token, account_id, candidate), True
+        except CloudflareError as exc:
+            if not _is_subdomain_taken(exc):
+                raise
+            last = exc
+            log.info("workers.dev name '%s' is taken, trying another", candidate)
+    raise CloudflareError(
+        "نتوانستم زیردامنه workers.dev بسازم — همه‌ی نام‌های پیشنهادی گرفته "
+        "شده‌اند. یک بار از داشبورد Cloudflare بخش Workers را باز کنید تا "
+        "خودش بسازد، سپس دوباره تلاش کنید.",
+        getattr(last, "errors", None),
+    )
+
+
+def _error_codes(exc: CloudflareError) -> set[int]:
+    codes = set()
+    for item in getattr(exc, "errors", None) or []:
+        try:
+            codes.add(int(item.get("code")))
+        except (TypeError, ValueError):
+            continue
+    return codes
+
+
+def _is_missing_subdomain(exc: CloudflareError) -> bool:
+    if 10007 in _error_codes(exc):
+        return True
+    return "workers.dev subdomain" in str(exc).lower()
+
+
+def _is_subdomain_taken(exc: CloudflareError) -> bool:
+    text = str(exc).lower()
+    return (10036 in _error_codes(exc)
+            or "already" in text or "taken" in text or "unavailable" in text)
 
 
 def enable_workers_dev(token: str, account_id: str, script_name: str) -> bool:
@@ -275,13 +476,11 @@ def deploy(token: str, account_id: str, script_name: str,
     account_id = resolve_account_id(token, account_id)
     record("یافتن حساب", True, account_id[:8] + "…")
 
-    subdomain = get_workers_subdomain(token, account_id)
-    if not subdomain:
-        raise CloudflareError(
-            "این حساب هنوز زیردامنه workers.dev ندارد. یک بار از داشبورد "
-            "Cloudflare بخش Workers را فعال کنید و دوباره تلاش کنید."
-        )
-    record("یافتن زیردامنه", True, f"{subdomain}.workers.dev")
+    subdomain, created = ensure_workers_subdomain(token, account_id, script_name)
+    record(
+        "ساخت زیردامنه" if created else "یافتن زیردامنه", True,
+        f"{subdomain}.workers.dev" + (" (تازه ساخته شد)" if created else ""),
+    )
 
     source = render_worker(script_name, subdomain)
     upload_script(token, account_id, script_name, source, vless_uuids)
