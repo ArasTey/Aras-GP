@@ -1,33 +1,19 @@
-"""Friends / VLESS clients — the "share a config" feature.
+"""The people a share config is issued to.
 
-The panel has no VPS, so the Cloudflare Worker it already deploys doubles as a
-VLESS server (see ``deploy/cloudflare-worker/worker.js``). Each friend gets a
-UUID here; the panel binds the whole set to the Worker at deploy time, hands
-each friend a ``vless://`` link and a QR code, and serves one subscription URL
-that a phone app refreshes on its own.
+Just the list: names, UUIDs, and whether each is enabled. Turning that list
+into configs is :mod:`share.subscription`, and putting them on Cloudflare is
+:mod:`share.worker` — this module knows nothing about either.
 
-Why VLESS-over-WebSocket and not the SOCKS5 accounts the relay already has:
-a friend's phone reaches ``<worker>.workers.dev`` from anywhere, through
-Cloudflare, with no port-forward and behind CGNAT — which a home machine's
-SOCKS5 port cannot offer. The trade-off is that this rides on Cloudflare
-Workers, whose terms of service disallow general proxying; see the panel's
-warning. It is the only architecture that satisfies "real VLESS + mobile +
-no VPS", so it is the one offered, with the risk stated plainly.
-
-This module owns the client list and the link/subscription rendering. It never
-touches config.json — VLESS clients are Worker-side, not relay accounts — so it
-reads and writes only the panel state through :mod:`store`.
+It never touches config.json. These are Worker-side identities, not relay
+accounts, so it reads and writes only the panel state through :mod:`store`.
 """
 
 from __future__ import annotations
 
-import base64
-import ipaddress
 import re
 import secrets
 import time
 import uuid as _uuid
-from urllib.parse import quote, urlparse
 
 from . import store
 
@@ -36,155 +22,8 @@ from . import store
 #: like «لپ‌تاپ», so rejecting that character rejects normal names.
 NAME_RE = re.compile(r"^[\w .\-()‌‏آ-یءؤئٔ]{1,40}$", re.UNICODE)
 
-#: Default VLESS WebSocket path if the operator has not chosen one.
-DEFAULT_PATH = "/aras"
-
-
 class ClientError(ValueError):
     """Raised with a Persian, user-facing message."""
-
-
-# ── state helpers ──────────────────────────────────────────────────────
-
-def _vless_settings() -> dict:
-    state = store.load()
-    section = state.get("vless")
-    if not isinstance(section, dict):
-        section = {}
-    section.setdefault("enabled", False)
-    section.setdefault("path", DEFAULT_PATH)
-    # A subscription token is minted the first time it is needed and then kept,
-    # so an existing friend's subscription URL does not rotate out from under
-    # them every time the panel restarts.
-    if not section.get("sub_token"):
-        section["sub_token"] = secrets.token_urlsafe(16)
-        store.update(vless=section)
-    return section
-
-
-def settings() -> dict:
-    section = _vless_settings()
-    return {
-        "enabled": bool(section.get("enabled")),
-        "path": _normalize_path(section.get("path")),
-        "clean_address": normalize_clean_address(section.get("clean_address")),
-        "alpn": normalize_alpn(section.get("alpn")),
-        "fingerprint": normalize_fingerprint(section.get("fingerprint")),
-        "sub_token": section.get("sub_token", ""),
-    }
-
-
-def set_enabled(enabled: bool) -> None:
-    section = _vless_settings()
-    section["enabled"] = bool(enabled)
-    store.update(vless=section)
-
-
-def set_path(path: str) -> str:
-    path = _normalize_path(path)
-    section = _vless_settings()
-    section["path"] = path
-    store.update(vless=section)
-    return path
-
-
-def _normalize_path(path) -> str:
-    path = str(path or "").strip()
-    if not path:
-        return DEFAULT_PATH
-    if not path.startswith("/"):
-        path = "/" + path
-    # A path is part of a URL; keep it to characters that survive one intact.
-    if not re.fullmatch(r"/[\w\-./]{0,63}", path):
-        return DEFAULT_PATH
-    return path
-
-
-# ── clean-address routing ──────────────────────────────────────────────
-# Cloudflare routes by SNI and Host, not by which of its edge IPs the TCP
-# connection landed on. So the address a client dials can be any Cloudflare
-# edge that the network in question has not blocked, while sni/host stay the
-# Worker's own hostname and the request still arrives at the Worker.
-#
-# That is the whole "clean IP" technique: the edge is chosen for reachability,
-# the hostname for routing. Which edges are reachable differs by network and
-# changes over time, so the address is entered by the operator rather than
-# guessed here.
-
-#: ALPN values worth offering. WebSocket runs over HTTP/1.1, so that is the
-#: default; h2 is accepted because some clients negotiate it successfully and
-#: it can be harder to fingerprint.
-_ALPN_CHOICES = ("http/1.1", "h2,http/1.1", "h2")
-
-#: uTLS ClientHello fingerprints the common clients implement.
-_FP_CHOICES = ("chrome", "firefox", "safari", "ios", "android", "edge",
-               "randomized")
-
-
-def normalize_clean_address(value) -> str:
-    """An IPv4/IPv6 literal or hostname to dial instead of the Worker's name.
-
-    Empty means "use the Worker's hostname", which is the previous behaviour.
-    Rejected rather than corrected when malformed: a silently-dropped address
-    would look like the setting had been applied and left the operator
-    debugging why nothing changed.
-    """
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    # Strip a scheme or trailing path if pasted from a browser bar.
-    text = re.sub(r"^[a-zA-Z][\w+.-]*://", "", text).split("/")[0].strip()
-    if not text:
-        return ""
-    # Bracketed IPv6, as it appears in a URL.
-    if text.startswith("[") and text.endswith("]"):
-        inner = text[1:-1]
-        try:
-            ipaddress.IPv6Address(inner)
-            return text
-        except ValueError:
-            return ""
-    try:
-        ipaddress.ip_address(text)
-        return text
-    except ValueError:
-        pass
-    # A hostname: a clean *domain* fronting Cloudflare is as valid as an IP.
-    if len(text) <= 253 and re.fullmatch(
-            r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*",
-            text):
-        return text.lower()
-    return ""
-
-
-def normalize_alpn(value) -> str:
-    text = str(value or "").strip().lower().replace(" ", "")
-    return text if text in _ALPN_CHOICES else _ALPN_CHOICES[0]
-
-
-def normalize_fingerprint(value) -> str:
-    text = str(value or "").strip().lower()
-    return text if text in _FP_CHOICES else "chrome"
-
-
-def set_transport(clean_address=None, alpn=None, fingerprint=None) -> dict:
-    """Update the transport knobs. Only the arguments given are touched."""
-    section = _vless_settings()
-    if clean_address is not None:
-        raw = str(clean_address).strip()
-        normalized = normalize_clean_address(raw)
-        if raw and not normalized:
-            raise ClientError(
-                "نشانی تمیز نامعتبر است. یک IP (مثل 104.16.0.1) یا یک دامنه "
-                "وارد کنید."
-            )
-        section["clean_address"] = normalized
-    if alpn is not None:
-        section["alpn"] = normalize_alpn(alpn)
-    if fingerprint is not None:
-        section["fingerprint"] = normalize_fingerprint(fingerprint)
-    store.update(vless=section)
-    return settings()
 
 
 # ── the client list ────────────────────────────────────────────────────
@@ -197,16 +36,17 @@ def list_clients() -> list[dict]:
 def uuids() -> list[str]:
     """Every enabled client's UUID — what the Worker is told to accept.
 
-    Empty while the feature is switched off, which is the default. The Worker
-    refuses every VLESS client when this binding is empty, so off here means
-    off there: the VLESS server does not exist until the operator has read what
-    it costs them and turned it on deliberately.
+    Empty while the share feature is off, which is the default. The Worker
+    refuses every client on an empty binding, so off here is off there — the
+    VLESS server does not exist until the operator has turned it on and
+    deployed deliberately.
 
-    The master switch is checked here rather than at the call sites because
-    this is the single value the Worker's behaviour derives from — gating
-    anywhere else would leave a path that still armed it.
+    The switch is read here rather than at the call sites because this is the
+    single value the Worker's behaviour derives from; gating anywhere else
+    would leave a path that still armed it.
     """
-    if not settings()["enabled"]:
+    share = store.load().get("share") or {}
+    if not share.get("enabled"):
         return []
     return [c["uuid"] for c in list_clients()
             if c.get("enabled", True) and c.get("uuid")]
@@ -272,104 +112,3 @@ def rotate_uuid(client_id: str) -> dict:
     return record
 
 
-# ── link + subscription rendering ──────────────────────────────────────
-
-def _worker_host() -> str:
-    """Bare hostname of the deployed Worker, or '' if none yet."""
-    url = (store.load().get("cloudflare") or {}).get("worker_url") or ""
-    if not url:
-        return ""
-    return urlparse(url).hostname or ""
-
-
-def vless_link(client: dict, host: str = "", path: str = "",
-               address: str = "") -> str:
-    """A ``vless://`` share link for one client.
-
-    ws + TLS, with ``sni`` and ``host`` set to the Worker's own hostname —
-    that is what terminates the TLS and what Cloudflare routes on.
-
-    The dialled address is separate. When a clean address is configured the
-    client connects to that edge instead of resolving the Worker's name, which
-    is what gets through a network that blocks ``workers.dev`` at the DNS or IP
-    level. Cloudflare still delivers it to this Worker, because routing is by
-    SNI and Host rather than by which edge answered.
-
-    The fragment is the friend's name, so it shows up labelled in their app.
-    """
-    host = host or _worker_host()
-    if not host or not client.get("uuid"):
-        return ""
-    conf = settings()
-    path = _normalize_path(path or conf["path"])
-    # An explicit argument wins, then the configured one, then the hostname —
-    # so nothing changes for an operator who never sets a clean address.
-    dial = normalize_clean_address(address) or conf["clean_address"] or host
-    query = (
-        "encryption=none"
-        "&security=tls"
-        "&sni=" + quote(host) +
-        "&type=ws"
-        "&host=" + quote(host) +
-        "&path=" + quote(path, safe="") +
-        "&alpn=" + quote(conf["alpn"], safe="") +
-        "&fp=" + quote(conf["fingerprint"])
-    )
-    label = quote(client.get("name") or "aras", safe="")
-    return f"vless://{client['uuid']}@{dial}:443?{query}#{label}"
-
-
-def all_links(host: str = "", path: str = "") -> list[str]:
-    """Every working link. Empty while the feature is off.
-
-    Handing out links the Worker is going to refuse would send friends off to
-    debug a config that cannot work, so there is nothing to copy until the
-    switch is on and a deploy has armed the Worker.
-    """
-    if not settings()["enabled"]:
-        return []
-    host = host or _worker_host()
-    path = path or settings()["path"]
-    out = []
-    for client in list_clients():
-        if not client.get("enabled", True):
-            continue
-        link = vless_link(client, host=host, path=path)
-        if link:
-            out.append(link)
-    return out
-
-
-def subscription(host: str = "", path: str = "") -> str:
-    """The base64 blob a phone app expects behind a subscription URL."""
-    body = "\n".join(all_links(host=host, path=path))
-    return base64.b64encode(body.encode("utf-8")).decode("ascii")
-
-
-def subscription_url(base_url: str) -> str:
-    """Absolute subscription URL to show the operator.
-
-    Rewritten to the machine's LAN address when the panel was opened on
-    loopback: a phone typing ``127.0.0.1`` reaches itself, not the panel, so
-    the copyable address has to be the one another device can actually dial.
-    Guarded by the token, so knowing the path is not enough to pull the
-    friends' UUIDs.
-    """
-    token = settings()["sub_token"]
-    base = base_url.rstrip("/")
-    parsed = urlparse(base)
-    if parsed.hostname in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
-        lan = _lan_ip()
-        if lan:
-            port = f":{parsed.port}" if parsed.port else ""
-            base = f"{parsed.scheme}://{lan}{port}"
-    return f"{base}/sub/{token}"
-
-
-def _lan_ip() -> str:
-    """This machine's LAN IPv4, or '' when it cannot be determined."""
-    try:
-        from lan_utils import _primary_ipv4      # from engine/
-        return _primary_ipv4() or ""
-    except Exception:
-        return ""

@@ -51,11 +51,11 @@ DEFAULT_STATE: dict = {
     # VLESS-over-WebSocket sharing: the Worker doubles as a VLESS server, and
     # each friend gets a UUID here. `path` is the WS path clients dial; the
     # sub_token guards the subscription URL so it is not guessable.
-    "vless": {
-        "enabled": False,
-        "path": "/aras",
-        "sub_token": "",
-    },
+    # (The old "vless" block lived here. It described a VLESS server running
+    # inside the relay's own Worker, which no longer exists — see "share"
+    # below. Existing state files may still carry it; nothing reads it, and
+    # the merge on load leaves unknown keys alone rather than dropping data
+    # this version does not recognise.)
     # The share deployment: its own Cloudflare Worker, separate from the
     # relay's. Kept apart from "cloudflare" above so a share deploy can never
     # overwrite the relay's script name or worker_url — the relay is what the

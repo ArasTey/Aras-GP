@@ -1060,60 +1060,7 @@ def create_app() -> Flask:
             "uuid": record.get("uuid"),
             "enabled": bool(record.get("enabled", True)),
             "note": record.get("note", ""),
-            "link": clients.vless_link(record),
         }
-
-    @app.post("/api/friends/enable")
-    @security.login_required
-    def api_friends_enable():
-        """Arm or disarm the Worker's VLESS server.
-
-        The switch is what binds or clears VLESS_UUIDS, so it has to reach the
-        Worker to mean anything — flipping it locally would leave the previous
-        state armed on Cloudflare. Off is the default and the safe direction:
-        an operator who turns it off wants it off now, not after they remember
-        to redeploy.
-        """
-        on = str(_json_body().get("enabled", "")).lower() in ("1", "true", "on")
-        clients.set_enabled(on)
-        applied = _push_clients_to_worker()
-        if on:
-            message = (
-                "روشن شد. " + applied + " تا وقتی Worker دیپلوی نشده باشد، "
-                "کانفیگ‌ها جواب نمی‌دهند."
-            )
-        else:
-            message = "خاموش شد. " + applied
-        return _ok(enabled=on, message=message)
-
-    @app.post("/api/friends/path")
-    @security.login_required
-    def api_friends_path():
-        path = clients.set_path(_json_body().get("path", ""))
-        message = "مسیر ذخیره شد. " + _push_clients_to_worker()
-        return _ok(path=path, message=message)
-
-    @app.post("/api/friends/transport")
-    @security.login_required
-    def api_friends_transport():
-        """Clean address, ALPN and TLS fingerprint for the generated configs.
-
-        None of these change the Worker, only the links handed out, so there is
-        no redeploy: Cloudflare routes on SNI and Host, and those still name the
-        Worker. Only the address a client dials moves.
-        """
-        body = _json_body()
-        try:
-            cfg = clients.set_transport(
-                clean_address=body.get("clean_address"),
-                alpn=body.get("alpn"),
-                fingerprint=body.get("fingerprint"),
-            )
-        except clients.ClientError as exc:
-            return _fail(str(exc))
-        where = cfg["clean_address"] or "نشانی خود Worker"
-        return _ok(settings=cfg,
-                   message=f"ذخیره شد. کانفیگ‌ها به {where} وصل می‌شوند.")
 
     @app.post("/api/friends/add")
     @security.login_required
@@ -1169,23 +1116,10 @@ def create_app() -> Flask:
         return _ok(clients=[_client_view(c) for c in clients.list_clients()],
                    message=message)
 
-    @app.get("/sub/<token>")
-    def subscription_feed(token):
-        """Public subscription — a phone app fetches this on its own timer.
-
-        No login: a phone cannot carry the panel session. The token is the
-        guard, so it is compared in constant time and a miss looks like any
-        other 404.
-        """
-        import hmac
-        expected = clients.settings()["sub_token"]
-        if not expected or not hmac.compare_digest(str(token), str(expected)):
-            return Response("not found", status=404)
-        body = clients.subscription()
-        return Response(body, mimetype="text/plain; charset=utf-8", headers={
-            "Profile-Update-Interval": "12",
-            "Cache-Control": "no-store",
-        })
+    # The panel used to serve the subscription at /sub/<token>. It could not
+    # work: the panel binds to loopback, so the phone that needs the
+    # subscription is exactly the device that cannot reach it. The share
+    # Worker serves it now, from an address that is reachable anywhere.
 
     # ── errors ────────────────────────────────────────────────────────
 
