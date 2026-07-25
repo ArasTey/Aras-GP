@@ -10,6 +10,7 @@ returns the response.
 
 import asyncio
 import base64
+import collections
 import hashlib
 import json
 import logging
@@ -136,6 +137,16 @@ class DomainFronter:
                                           len(self._script_ids)))
         self._sid_blacklist: dict[str, float] = {}
         self._blacklist_ttl = SCRIPT_BLACKLIST_TTL
+
+        # Rolling record of urlfetch call timestamps, so the panel can show
+        # how close the account is to Google's daily ceiling. Without this the
+        # only way to find the limit is to hit it, which costs a day of relay.
+        self._quota_calls: collections.deque[float] = collections.deque()
+        self._quota_by_sid: dict[str, int] = {}
+        self._urlfetch_quota = self._cfg_int(
+            config, "urlfetch_daily_quota", self.URLFETCH_QUOTA_CONSUMER,
+            minimum=1,
+        )
 
         # Per-host stats (requests, cache hits, bytes, cumulative latency).
         self._per_site: dict[str, HostStat] = {}
@@ -669,9 +680,12 @@ class DomainFronter:
     #: the ID is wrong — three problems with three different fixes.
     _RELAY_DIAGNOSTICS: tuple[tuple[str, str], ...] = (
         ("too many times for one day",
-         "Apps Script daily quota is exhausted. Google resets it at midnight "
-         "US Pacific time. Add another script deployment (ideally on a second "
-         "Google account) and put both IDs in script_id to spread the load."),
+         "Apps Script daily urlfetch quota is exhausted (20,000 calls on a "
+         "consumer account, 100,000 on Workspace). It refills on a rolling "
+         "24-hour window from your first call of the period, not at a fixed "
+         "midnight, so waiting for a clock time will not help. Add another "
+         "script deployment (ideally on a second Google account) and put both "
+         "IDs in script_id to spread the load."),
         ("exceeded maximum execution time",
          "An Apps Script execution hit Google's runtime limit. Usually one "
          "very large response — lower max_response_body_bytes or let the "
@@ -858,6 +872,63 @@ class DomainFronter:
         if errored:
             stat.errors += 1
 
+    #: Google's documented per-account urlfetch ceiling. Consumer accounts get
+    #: 20,000 calls a day, Workspace 100,000 — and the window is a rolling 24
+    #: hours from the first call of the period, not a calendar midnight. Set
+    #: `urlfetch_daily_quota` if the account this relay runs on differs.
+    URLFETCH_QUOTA_CONSUMER = 20_000
+    URLFETCH_QUOTA_WORKSPACE = 100_000
+    _QUOTA_WINDOW_S = 24 * 60 * 60
+
+    def _record_relay_call(self, sid: str, n: int = 1) -> None:
+        """Count urlfetch calls against the rolling daily quota.
+
+        Every relay attempt is one urlfetch call on Google's meter, whether it
+        succeeded or not — a failed call is still spent. Fan-out spends one per
+        racer, and each chunk of a chunked download is its own call, so the
+        count is kept here rather than inferred from request totals, which
+        undercounts both.
+        """
+        now = time.time()
+        cutoff = now - self._QUOTA_WINDOW_S
+        calls = self._quota_calls
+        # Drop anything that aged out of the window. The deque is ordered, so
+        # this is a walk off the front rather than a scan.
+        while calls and calls[0] <= cutoff:
+            calls.popleft()
+        for _ in range(n):
+            calls.append(now)
+        self._quota_by_sid[sid] = self._quota_by_sid.get(sid, 0) + n
+
+    def quota_snapshot(self) -> dict:
+        """Where this relay stands against the daily urlfetch quota."""
+        now = time.time()
+        cutoff = now - self._QUOTA_WINDOW_S
+        calls = self._quota_calls
+        while calls and calls[0] <= cutoff:
+            calls.popleft()
+        used = len(calls)
+        limit = self._urlfetch_quota * max(1, len(self._script_ids))
+        # The window resets progressively, so "when does it reset" is really
+        # "when does the oldest call age out" — that is when headroom returns.
+        oldest = calls[0] if calls else now
+        return {
+            "used": used,
+            "limit": limit,
+            "remaining": max(0, limit - used),
+            "percent": round(used / limit * 100, 1) if limit else 0.0,
+            "window_hours": self._QUOTA_WINDOW_S / 3600,
+            "next_refill_in_s": int(max(0, oldest + self._QUOTA_WINDOW_S - now)),
+            "scripts": len(self._script_ids),
+            "per_script_limit": self._urlfetch_quota,
+            "calls_per_request": self._parallel_relay,
+            "by_script": {
+                (s[-8:] if len(s) > 8 else s): c
+                for s, c in sorted(self._quota_by_sid.items(),
+                                   key=lambda kv: -kv[1])
+            },
+        }
+
     def stats_snapshot(self) -> dict:
         """Return a point-in-time snapshot of traffic + script health."""
         per_site = []
@@ -884,6 +955,7 @@ class DomainFronter:
             "parallel_relay": self._parallel_relay,
             "last_error": self.last_error,
             "last_error_at": self.last_error_at,
+            "quota": self.quota_snapshot(),
         }
 
     async def _stats_logger(self):
@@ -2125,6 +2197,9 @@ class DomainFronter:
         json_body = self._encode_relay_payload(payload)
 
         path = self._exec_path_for_sid(sid)
+        # Counted before the call, not after: Google meters the attempt, so a
+        # timeout or a 403 is quota already spent.
+        self._record_relay_call(sid)
 
         status, headers, body = await self._h2.request(
             method="POST", path=path, host=self.http_host,
@@ -2152,6 +2227,7 @@ class DomainFronter:
         json_body = self._encode_relay_payload(payload)
 
         path = self._exec_path_for_sid(sid)
+        self._record_relay_call(sid)
         reader, writer, created = await self._acquire()
 
         try:
@@ -2236,6 +2312,15 @@ class DomainFronter:
         }
         json_body = json.dumps(batch_payload).encode()
         path = self._exec_path(payloads[0].get("u") if payloads else None)
+        # fetchAll is one HTTP round trip but Google meters every URL inside it
+        # separately, so batching saves latency, not quota. Counting it as one
+        # call would understate usage by however many requests were bundled.
+        self._record_relay_call(
+            self._script_id_for_key(
+                self._host_key(payloads[0].get("u") if payloads else None),
+            ),
+            n=len(payloads),
+        )
 
         # Try HTTP/2 first
         if self._h2_available():
