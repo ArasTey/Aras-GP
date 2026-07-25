@@ -12,21 +12,26 @@
 </head>
 <body>
 {% from '_icons.html' import icon %}
+{#
+  Two products, not one menu. The relay is the operator's own traffic through
+  Google Apps Script; Share runs other people's traffic through a separate
+  Cloudflare Worker and carries a terms-of-service risk the relay does not.
+  Mixing them in one list was how the second one got switched on by people who
+  only wanted the first.
+#}
 {% set nav_groups = [
-  ('کنترل', [
+  ('رله — ترافیک خودتان', [
     ('dashboard',    'داشبورد',      'gauge'),
     ('status_page',  'وضعیت',        'pulse'),
+    ('deploy_page',  'دیپلوی رله',   'rocket'),
+    ('config_page',  'تنظیمات رله',  'sliders'),
+    ('users_page',   'کاربران رله',  'users'),
   ]),
-  ('راه‌اندازی', [
-    ('deploy_page',  'دیپلوی',       'rocket'),
-    ('config_page',  'ساخت کانفیگ',  'sliders'),
+  ('اشتراک — برای دیگران', [
+    ('friends_page', 'کانفیگ‌ها',     'link'),
   ]),
-  ('مدیریت', [
-    ('users_page',   'کاربران',      'users'),
-    ('friends_page', 'دوستان',       'link'),
-    ('settings_page','تنظیمات',      'gear'),
-  ]),
-  ('کمک', [
+  ('عمومی', [
+    ('settings_page','تنظیمات پنل',  'gear'),
     ('guide_page',   'راهنما',       'info'),
   ])
 ] %}

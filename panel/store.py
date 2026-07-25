@@ -56,6 +56,23 @@ DEFAULT_STATE: dict = {
         "path": "/aras",
         "sub_token": "",
     },
+    # The share deployment: its own Cloudflare Worker, separate from the
+    # relay's. Kept apart from "cloudflare" above so a share deploy can never
+    # overwrite the relay's script name or worker_url — the relay is what the
+    # operator depends on, and this is the half that can get taken down.
+    # Empty until the operator deploys it; names and paths are generated then.
+    "share": {
+        "enabled": False,
+        "script_name": "",     # random, generated at first deploy
+        "host": "",            # <script>.<subdomain>.workers.dev
+        "ws_path": "",         # random; where clients connect
+        "sub_path": "",        # random and different; where the sub is served
+        "sub_url": "",
+        "addresses": [],       # clean IPs/domains, all of them in one sub
+        "alpn": "http/1.1",
+        "fingerprint": "chrome",
+        "deployed_at": 0.0,
+    },
     "clients": [],             # friends — see clients.py
 }
 

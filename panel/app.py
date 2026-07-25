@@ -31,6 +31,7 @@ from . import (
     __version__, clients, cloudflare, configgen, failover, gasgen, licensing,
     paths, security, store, users,
 )
+from share import subscription as share_sub, worker as share_worker
 from .relay_manager import (
     macos_trust_command, manager, refresh_ca_status, stale_ca_command,
 )
@@ -943,21 +944,114 @@ def create_app() -> Flask:
             return f"روی Worker اعمال نشد: {exc}"
         return "ذخیره و روی Worker اعمال شد."
 
+    # ── share: its own Worker, its own state ──────────────────────────
+    # Every route below writes only the "share" section and share/'s own
+    # deployment. None of them touch the relay's config, its Worker, or the
+    # "cloudflare" state the relay deploy owns.
+
+    def _share_state() -> dict:
+        state = store.load().get("share")
+        return dict(state) if isinstance(state, dict) else {}
+
     @app.route("/friends")
     @security.login_required
     def friends_page():
-        cfg = clients.settings()
-        worker_url = (store.load().get("cloudflare") or {}).get("worker_url") or ""
-        base = request.host_url.rstrip("/")
+        share = _share_state()
         return render_template(
             "friends.html",
-            vless=cfg,
-            worker_url=worker_url,
-            has_worker=bool(worker_url),
+            share=share,
+            deployed=bool(share.get("host")),
             clients=[_client_view(c) for c in clients.list_clients()],
-            sub_url=clients.subscription_url(base) if worker_url else "",
+            addresses="\n".join(share.get("addresses") or []),
             token_saved=bool((store.load().get("cloudflare") or {}).get("token")),
         )
+
+    @app.post("/api/share/deploy")
+    @security.login_required
+    @security.rate_limit("share_deploy", limit=6, window=300)
+    def api_share_deploy():
+        """Deploy or redeploy the share Worker.
+
+        Reuses the stored name and paths when there are any, so redeploying to
+        pick up a new friend does not invalidate configs already in people's
+        apps. A first deploy generates both.
+        """
+        body = _json_body()
+        try:
+            token = _cf_token(body)
+        except ValueError as exc:
+            return _fail(str(exc))
+        account_id = (store.load().get("cloudflare") or {}).get("account_id") or ""
+        if not account_id:
+            return _fail("اول رله را دیپلوی کنید تا شناسه‌ی حساب کلودفلر پیدا شود.")
+
+        share = _share_state()
+        addresses = share_sub.parse_addresses(
+            body.get("addresses", share.get("addresses") or [])
+        )
+        try:
+            result = share_worker.deploy(
+                token, account_id,
+                clients=clients.list_clients(),
+                addresses=addresses,
+                script_name=share.get("script_name", ""),
+                ws_path=share.get("ws_path", ""),
+                sub_path=share.get("sub_path", ""),
+                alpn=share.get("alpn", share_sub.DEFAULT_ALPN),
+                fingerprint=share.get("fingerprint", share_sub.DEFAULT_FINGERPRINT),
+            )
+        except cloudflare.CloudflareError as exc:
+            return _fail(exc.message, 502, details=exc.errors)
+
+        share.update(
+            enabled=True, script_name=result["script_name"],
+            host=result["host"], ws_path=result["ws_path"],
+            sub_path=result["sub_path"], sub_url=result["sub_url"],
+            addresses=addresses, deployed_at=time.time(),
+        )
+        store.update(share=share)
+        return _ok(share=share, result=result,
+                   message=f"دیپلوی شد: {result['links']} کانفیگ روی "
+                           f"{max(1, len(addresses))} نشانی.")
+
+    @app.post("/api/share/addresses")
+    @security.login_required
+    def api_share_addresses():
+        """Save the clean addresses. Needs a redeploy to reach clients.
+
+        The subscription lives in the Worker's bindings, so changing it here
+        only changes what the *next* deploy will publish — said plainly rather
+        than letting the operator think it already applied.
+        """
+        share = _share_state()
+        addresses = share_sub.parse_addresses(_json_body().get("addresses", ""))
+        share["addresses"] = addresses
+        store.update(share=share)
+        note = (" برای اعمال، دوباره دیپلوی کنید."
+                if share.get("host") else "")
+        return _ok(addresses=addresses,
+                   message=f"{len(addresses)} نشانی ذخیره شد.{note}")
+
+    @app.post("/api/share/disable")
+    @security.login_required
+    def api_share_disable():
+        """Take the share Worker down. The relay is untouched."""
+        share = _share_state()
+        script_name = share.get("script_name") or ""
+        token = _cf_token_quiet()
+        account_id = (store.load().get("cloudflare") or {}).get("account_id") or ""
+        removed = False
+        if script_name and token and account_id:
+            try:
+                share_worker.delete(token, account_id, script_name)
+                removed = True
+            except cloudflare.CloudflareError as exc:
+                return _fail(f"حذف نشد: {exc.message}", 502)
+        share.update(enabled=False, host="", sub_url="")
+        store.update(share=share)
+        return _ok(message=("Worker اشتراک حذف شد. رله دست‌نخورده است."
+                            if removed else
+                            "خاموش شد. برای حذف کامل از کلودفلر، توکن لازم است."))
 
     def _client_view(record: dict) -> dict:
         return {
