@@ -28,7 +28,6 @@ import contextlib
 import logging
 import os
 import platform
-import subprocess
 import threading
 import time
 from collections import deque

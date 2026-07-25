@@ -22,9 +22,6 @@ except Exception:  # optional dependency fallback
 
 from constants import (
     CACHE_MAX_MB,
-    CACHE_TTL_MAX,
-    CACHE_TTL_STATIC_LONG,
-    CACHE_TTL_STATIC_MED,
     CLIENT_IDLE_TIMEOUT,
     GOOGLE_DIRECT_ALLOW_EXACT,
     GOOGLE_DIRECT_ALLOW_SUFFIXES,
@@ -37,7 +34,6 @@ from constants import (
     MAX_REQUEST_BODY_BYTES,
     MAX_UPLOAD_BODY_BYTES,
     SNI_REWRITE_SUFFIXES,
-    STATIC_EXTS,
     TCP_CONNECT_TIMEOUT,
     TRACE_HOST_SUFFIXES,
     UNCACHEABLE_HEADER_NAMES,

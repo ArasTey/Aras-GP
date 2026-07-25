@@ -15,8 +15,6 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
-import tempfile
 
 log = logging.getLogger("Cert")
 

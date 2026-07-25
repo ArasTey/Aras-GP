@@ -194,7 +194,7 @@ def main() -> int:
     print(green(f"[OK] wrote {CONFIG_PATH.name}"))
     print()
     print(bold("Next step:"))
-    print(f"  python main.py")
+    print("  python main.py")
     print()
     print(yellow("Reminder: generate Code.gs from the panel (Deploy page) - it embeds"))
     print(yellow("this key for you. A hand-edited AUTH_KEY that differs returns 'unauthorized'."))

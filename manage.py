@@ -497,13 +497,13 @@ def action_view_settings() -> None:
     v = read_version()
     print(f"  Panel version   : {bold(v)}")
     print(f"  Panel URL       : http://{panel_host()}:{panel_port()}")
-    print(f"  State           : "
+    print("  State           : "
           + (green("running") if is_running() else red("stopped")))
-    print(f"  Autostart       : "
+    print("  Autostart       : "
           + (green("on") if _autostart_installed() else dim("off")))
-    print(f"  Virtualenv      : "
+    print("  Virtualenv      : "
           + (green("installed") if venv_ready() else red("not installed")))
-    print(f"  Panel password  : "
+    print("  Panel password  : "
           + (green("set") if _admin_set() else yellow("not set yet")))
     print(dim("  -- relay config --"))
     cfg = _load_json(CONFIG_JSON)
@@ -517,7 +517,7 @@ def action_view_settings() -> None:
         if isinstance(sid, list):
             sid = f"{len(sid)} scripts"
         print(f"    Apps Script     : {_short(str(sid))}")
-        print(f"    Auth key        : "
+        print("    Auth key        : "
               + (green("auto (set)") if cfg.get("auth_key") else yellow("empty")))
     pj = _load_json(PANEL_JSON)
     worker = ((pj.get("cloudflare") or {}).get("worker_url")) if pj else ""
