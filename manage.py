@@ -182,6 +182,39 @@ def _read_pid() -> int | None:
         return None
 
 
+def _set_running_endpoint(host: str, port: int) -> None:
+    """Record what the panel we just launched is actually listening on."""
+    state = load_state()
+    state["running"] = {"host": host, "port": port}
+    save_state(state)
+
+
+def _clear_running_endpoint() -> None:
+    state = load_state()
+    if state.pop("running", None) is not None:
+        save_state(state)
+
+
+def _running_endpoint() -> tuple[str, int]:
+    """The host and port the *running* panel was actually started on.
+
+    Not the same thing as the configured one: changing the port writes the new
+    value immediately, and everything that looks for the live panel afterwards
+    would probe an address nothing is listening on — so the running instance
+    reads as stopped, survives the restart, and a second panel appears on the
+    new port. Recorded at launch and preferred here for exactly that reason.
+    """
+    state = load_state()
+    running = state.get("running")
+    if isinstance(running, dict):
+        try:
+            return (str(running.get("host") or DEFAULT_HOST),
+                    int(running.get("port")))
+        except (TypeError, ValueError):
+            pass
+    return panel_host(), panel_port()
+
+
 def _pid_alive(pid: int | None) -> bool:
     if pid is None:
         return False
@@ -206,12 +239,17 @@ def _port_open(host: str, port: int, timeout: float = 0.6) -> bool:
 
 
 def is_running() -> bool:
-    """True when the panel actually answers on its port, not merely that a PID
-    file exists — a stale PID after a reboot must not read as Running."""
-    if _port_open(panel_host(), panel_port()):
+    """True when the managed panel is up.
+
+    Answering on its port is the primary signal — a stale PID after a reboot
+    must not read as Running. But a live PID counts too: during a port change
+    the panel is listening somewhere we may no longer be probing, and calling
+    that "stopped" is what used to leave two panels running.
+    """
+    host, port = _running_endpoint()
+    if _port_open(host, port):
         return True
-    pid = _read_pid()
-    return _pid_alive(pid) and _port_open(panel_host(), panel_port(), 0.3)
+    return _pid_alive(_read_pid())
 
 
 def start_panel(quiet: bool = False) -> bool:
@@ -224,9 +262,12 @@ def start_panel(quiet: bool = False) -> bool:
         return True
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    # Read the configuration once and launch against that exact pair, so what
+    # gets recorded below is provably what the process was told to bind.
+    host, port = panel_host(), panel_port()
     env = os.environ.copy()
-    env["ARAS_PANEL_PORT"] = str(panel_port())
-    env["ARAS_PANEL_HOST"] = panel_host()
+    env["ARAS_PANEL_PORT"] = str(port)
+    env["ARAS_PANEL_HOST"] = host
     log = open(LOG_FILE, "ab")
     try:
         if IS_WINDOWS:
@@ -247,16 +288,20 @@ def start_panel(quiet: bool = False) -> bool:
 
     PID_FILE.write_text(str(proc.pid))
     _chmod_600(PID_FILE)
+    _set_running_endpoint(host, port)
 
     for _ in range(20):
-        if _port_open(panel_host(), panel_port(), 0.4):
+        if _port_open(host, port, 0.4):
             if not quiet:
-                print(green(f"  Panel is up  ->  http://{panel_host()}:{panel_port()}"))
+                print(green(f"  Panel is up  ->  http://{host}:{port}"))
             return True
         if proc.poll() is not None:
             break
         time.sleep(0.5)
 
+    # It never came up, so nothing is listening on that pair — leaving the
+    # record behind would make the next status check trust a dead address.
+    _clear_running_endpoint()
     print(red("  Panel failed to start. Last log lines:"))
     _tail(LOG_FILE, 20)
     return False
@@ -264,14 +309,22 @@ def start_panel(quiet: bool = False) -> bool:
 
 def stop_panel(quiet: bool = False) -> bool:
     pid = _read_pid()
-    if not is_running():
+    host, port = _running_endpoint()
+    # A live PID is authoritative. Deciding "stopped" from the port alone let a
+    # running panel be declared dead whenever the configured port had just
+    # changed, and the PID file was then deleted — orphaning a process that
+    # still held the old port with nothing left to stop it by.
+    if not _pid_alive(pid) and not _port_open(host, port):
         if not quiet:
             print(yellow("  Panel is not running."))
         PID_FILE.unlink(missing_ok=True)
+        _clear_running_endpoint()
         return True
     if pid is None:
         if not quiet:
-            print(yellow("  Panel port is open but PID unknown."))
+            print(yellow(f"  Something is listening on {host}:{port} but the "
+                         "PID file is missing, so it cannot be stopped safely."))
+            print(dim("     Find it with:  lsof -nP -iTCP:%d -sTCP:LISTEN" % port))
         return False
     if IS_WINDOWS:
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
@@ -291,6 +344,7 @@ def stop_panel(quiet: bool = False) -> bool:
             except OSError:
                 pass
     PID_FILE.unlink(missing_ok=True)
+    _clear_running_endpoint()
     if not quiet:
         print(green("  Panel stopped."))
     return True
@@ -444,14 +498,28 @@ def action_change_port() -> None:
     if port != panel_port() and _port_open("127.0.0.1", port):
         print(red(f"  Port {port} is already in use. Pick another."))
         return
+
+    # Stop before persisting. The running panel is only reachable at the old
+    # port, so writing the new one first left nothing able to find it: the
+    # restart was skipped, the old process kept the old port, and starting
+    # again produced a second panel on the new one.
+    was_running = is_running()
+    restart = was_running and _confirm("Restart the panel to apply?",
+                                       default=True)
+    if restart and not stop_panel(quiet=True):
+        print(red("  Could not stop the running panel — port left unchanged."))
+        return
+
     state = load_state()
     state["port"] = port
     save_state(state)
     print(green(f"  Port set to {port}."))
-    if is_running():
-        if _confirm("Restart the panel to apply?", default=True):
-            if stop_panel(quiet=True):
-                start_panel()
+
+    if restart:
+        start_panel()
+    elif was_running:
+        print(yellow(f"  The panel is still on the old port until you restart "
+                     f"it; the new port ({port}) applies then."))
     if _autostart_installed():
         _enable_autostart(quiet=True)   # rewrite service with the new port
 
@@ -869,13 +937,25 @@ def action_toggle_lan() -> None:
 
 
 def _set_host(host: str) -> None:
+    # Stop first, for the same reason the port change does: the live panel is
+    # bound to the old address, and persisting the new one before stopping
+    # leaves it running while a restart binds a second copy.
+    was_running = is_running()
+    restart = was_running and _confirm("Restart the panel to apply?",
+                                       default=True)
+    if restart and not stop_panel(quiet=True):
+        print(red("  Could not stop the running panel — address left unchanged."))
+        return
+
     state = load_state()
     state["host"] = host
     save_state(state)
     print(green(f"  Set to {host}."))
-    if is_running() and _confirm("Restart the panel to apply?", default=True):
-        if stop_panel(quiet=True):
-            start_panel()
+
+    if restart:
+        start_panel()
+    elif was_running:
+        print(yellow("  The panel keeps its current address until you restart it."))
     if _autostart_installed():
         _enable_autostart(quiet=True)
 
