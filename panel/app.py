@@ -372,7 +372,9 @@ def create_app() -> Flask:
         google = stats.get("quota") or {}
 
         cf_state = store.load().get("cloudflare") or {}
-        token = (cf_state.get("token") or "").strip()
+        # Resolved at call time, so a token entered this session counts even
+        # when the operator declined to save it to disk.
+        token = _cf_token_quiet().strip()
         account = (cf_state.get("account_id") or "").strip()
         script = (cf_state.get("script_name") or "").strip()
         cf = {
@@ -381,10 +383,13 @@ def create_app() -> Flask:
             "used": 0,
             "limit": cloudflare.WORKERS_FREE_DAILY_REQUESTS,
         }
-        if not token or not account:
+        if not token:
             cf["reason"] = (
-                "توکن یا شناسه‌ی حساب ذخیره نشده — آمار کلودفلر در دسترس نیست."
+                "توکن کلودفلر در دست نیست. یک بار در صفحه‌ی دیپلوی واردش کنید "
+                "(همان‌جا می‌ماند تا پنل بسته شود)، یا «ذخیره‌ی توکن» را روشن کنید."
             )
+        elif not account:
+            cf["reason"] = "شناسه‌ی حساب کلودفلر ذخیره نشده — یک بار دیپلوی کنید."
         else:
             try:
                 usage = cloudflare.workers_usage(token, account, script)
@@ -621,14 +626,29 @@ def create_app() -> Flask:
 
     # ── Cloudflare deploy ─────────────────────────────────────────────
 
+    # A token the operator typed but chose not to save. Kept for this process
+    # only, never written anywhere: the usage bar needs a token to read
+    # analytics, and requiring "remember token" for it would push people into
+    # persisting a credential they had deliberately declined to persist.
+    # Cleared when the process exits, which is the intended lifetime.
+    session_cf_token: dict[str, str] = {}
+
     def _cf_token(body: dict) -> str:
         token = (body.get("api_token") or "").strip()
         if token:
+            session_cf_token["value"] = token
             return token
         saved = store.load()["cloudflare"].get("token") or ""
-        if not saved:
-            raise ValueError("توکن API کلودفلر وارد نشده است.")
-        return saved
+        if saved:
+            return saved
+        if session_cf_token.get("value"):
+            return session_cf_token["value"]
+        raise ValueError("توکن API کلودفلر وارد نشده است.")
+
+    def _cf_token_quiet() -> str:
+        """Any token available without asking. Empty when there is none."""
+        saved = (store.load().get("cloudflare") or {}).get("token") or ""
+        return saved or session_cf_token.get("value", "")
 
     @app.post("/api/cloudflare/verify")
     @security.login_required

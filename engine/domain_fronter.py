@@ -14,6 +14,7 @@ import collections
 import hashlib
 import json
 import logging
+import os
 import re
 import socket
 import ssl
@@ -143,10 +144,12 @@ class DomainFronter:
         # only way to find the limit is to hit it, which costs a day of relay.
         self._quota_calls: collections.deque[float] = collections.deque()
         self._quota_by_sid: dict[str, int] = {}
+        self._quota_flushed_at = 0.0
         self._urlfetch_quota = self._cfg_int(
             config, "urlfetch_daily_quota", self.URLFETCH_QUOTA_CONSUMER,
             minimum=1,
         )
+        self._load_quota()
 
         # Per-host stats (requests, cache hits, bytes, cumulative latency).
         self._per_site: dict[str, HostStat] = {}
@@ -899,6 +902,88 @@ class DomainFronter:
         for _ in range(n):
             calls.append(now)
         self._quota_by_sid[sid] = self._quota_by_sid.get(sid, 0) + n
+        self._maybe_persist_quota(now)
+
+    # Google's window does not reset because this process restarted, so neither
+    # should the count. Kept on disk and reloaded, or every restart would
+    # report an empty quota and the bar would understate how much is gone.
+    _QUOTA_FLUSH_INTERVAL = 20.0
+
+    def _quota_state_file(self) -> str:
+        # Same location the panel uses for its own state, and the same
+        # ARAS_DATA_DIR override, so a relocated install keeps one data dir.
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = (os.environ.get("ARAS_DATA_DIR")
+                    or os.path.join(project_root, "panel", "data"))
+        return os.path.join(data_dir, "quota.json")
+
+    def _maybe_persist_quota(self, now: float) -> None:
+        """Write the window to disk, at most every _QUOTA_FLUSH_INTERVAL.
+
+        Rate limited because this runs on every relay call: a flush per call
+        would put a synchronous write on the hot path.
+        """
+        if now - self._quota_flushed_at < self._QUOTA_FLUSH_INTERVAL:
+            return
+        self._quota_flushed_at = now
+        self._persist_quota()
+
+    def _persist_quota(self) -> None:
+        path = self._quota_state_file()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            payload = {
+                "version": 1,
+                "calls": list(self._quota_calls),
+                "by_sid": self._quota_by_sid,
+            }
+            # Write and rename: a torn file would be discarded on load, which
+            # silently resets the very count this exists to preserve.
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            os.replace(tmp, path)
+        except OSError as exc:
+            log.debug("Could not persist quota state: %s", exc)
+
+    def _load_quota(self) -> None:
+        """Restore the rolling window, dropping anything already expired."""
+        path = self._quota_state_file()
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict) or data.get("version") != 1:
+            return
+
+        cutoff = time.time() - self._QUOTA_WINDOW_S
+        raw = data.get("calls")
+        if not isinstance(raw, list):
+            return
+        kept = []
+        for value in raw:
+            try:
+                stamp = float(value)
+            except (TypeError, ValueError):
+                continue
+            # Ignore timestamps from the future: a clock that moved backwards
+            # would otherwise pin entries in the window indefinitely.
+            if cutoff < stamp <= time.time() + 60:
+                kept.append(stamp)
+        kept.sort()
+        self._quota_calls.extend(kept)
+
+        by_sid = data.get("by_sid")
+        if isinstance(by_sid, dict):
+            for key, value in by_sid.items():
+                try:
+                    self._quota_by_sid[str(key)] = int(value)
+                except (TypeError, ValueError):
+                    continue
+        if kept:
+            log.info("Quota: restored %d calls still inside the 24h window",
+                     len(kept))
 
     def quota_snapshot(self) -> dict:
         """Where this relay stands against the daily urlfetch quota."""
@@ -1113,6 +1198,11 @@ class DomainFronter:
 
     async def close(self):
         """Cancel background tasks and close all pooled / H2 connections."""
+        # Flush the quota window first: the periodic write is rate limited, so
+        # up to _QUOTA_FLUSH_INTERVAL of calls are only in memory at this point
+        # and a clean shutdown should not lose them.
+        self._persist_quota()
+
         tasks = list(self._bg_tasks)
         for task in tasks:
             task.cancel()
