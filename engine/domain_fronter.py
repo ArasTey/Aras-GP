@@ -1418,7 +1418,6 @@ class DomainFronter:
                 rh_base = dict(headers) if headers else {}
                 rh_base["Range"] = f"bytes={s}-{e}"
                 payload = self._build_payload("GET", url, rh_base, b"")
-                expected = e - s + 1
                 last_err = None
                 for attempt in range(max_tries):
                     try:
@@ -1490,7 +1489,7 @@ class DomainFronter:
         )
 
         # Return as 200 OK (client sent a normal GET)
-        result = f"HTTP/1.1 200 OK\r\n"
+        result = "HTTP/1.1 200 OK\r\n"
         skip = {"transfer-encoding", "connection", "keep-alive",
                 "content-length", "content-encoding", "content-range"}
         for k, v in resp_hdrs.items():
@@ -1617,7 +1616,6 @@ class DomainFronter:
                 base_headers = dict(headers) if headers else {}
                 base_headers["Range"] = f"bytes={start_off}-{end_off}"
                 payload = self._build_payload("GET", url, base_headers, b"")
-                expected = end_off - start_off + 1
                 last_err = "unknown"
                 try:
                     for attempt in range(max_tries):
@@ -1762,8 +1760,21 @@ class DomainFronter:
         "proxy-connection",
     })
 
+    #: Bodies at or above this go through the splice path in
+    #: `_encode_relay_payload` instead of being base64'd into the dict. Below
+    #: it the extra copies are irrelevant and a plain dict keeps the batch and
+    #: coalescing paths simple.
+    _BODY_SPLICE_MIN = 256 * 1024
+
     def _build_payload(self, method, url, headers, body):
-        """Build the JSON relay payload dict."""
+        """Build the JSON relay payload dict.
+
+        A large body is left out of the dict under ``_raw`` for
+        `_encode_relay_payload` to splice in, because base64'ing it here costs
+        three full extra copies of it: the ``.decode()`` to str, the str that
+        ``json.dumps`` builds while re-escaping it, and the ``.encode()`` back
+        to bytes. On a 32 MB upload that was 139 MB of peak allocation.
+        """
         payload = {
             "m": method,
             "u": url,
@@ -1777,11 +1788,33 @@ class DomainFronter:
                     if k.lower() not in self._STRIP_HEADERS}
             payload["h"] = filt if filt else headers
         if body:
-            payload["b"] = base64.b64encode(body).decode()
+            if len(body) >= self._BODY_SPLICE_MIN:
+                payload["_raw"] = body
+            else:
+                payload["b"] = base64.b64encode(body).decode()
             ct = headers.get("Content-Type") or headers.get("content-type")
             if ct:
                 payload["ct"] = ct
         return payload
+
+    def _encode_relay_payload(self, payload: dict) -> bytes:
+        """Serialize a relay payload to the JSON bytes that go on the wire.
+
+        When `_build_payload` deferred a large body, it is base64'd straight
+        into the output as bytes. That is safe without escaping because the
+        base64 alphabet has no character JSON would need to quote, and it
+        avoids materialising the body as a Python str at all.
+        """
+        full = dict(payload)
+        full["k"] = self.auth_key
+        raw = full.pop("_raw", None)
+        if not raw:
+            return json.dumps(full).encode()
+        full.pop("b", None)
+        # Drop the closing brace, append the body member, close it again.
+        head = json.dumps(full)[:-1].encode()
+        sep = b"," if len(full) else b""
+        return head + sep + b'"b":"' + base64.b64encode(raw) + b'"}'
 
     @classmethod
     def _is_static_asset_url(cls, url: str) -> bool:
@@ -2089,9 +2122,7 @@ class DomainFronter:
         """
         if sid is None:
             sid = self._script_id_for_key(self._host_key(payload.get("u")))
-        full_payload = dict(payload)
-        full_payload["k"] = self.auth_key
-        json_body = json.dumps(full_payload).encode()
+        json_body = self._encode_relay_payload(payload)
 
         path = self._exec_path_for_sid(sid)
 
@@ -2116,12 +2147,9 @@ class DomainFronter:
     async def _relay_single(self, payload: dict,
                             sid: str | None = None) -> bytes:
         """Execute a single relay POST → redirect → parse."""
-        # Add auth key
         if sid is None:
             sid = self._script_id_for_key(self._host_key(payload.get("u")))
-        full_payload = dict(payload)
-        full_payload["k"] = self.auth_key
-        json_body = json.dumps(full_payload).encode()
+        json_body = self._encode_relay_payload(payload)
 
         path = self._exec_path_for_sid(sid)
         reader, writer, created = await self._acquire()
@@ -2182,11 +2210,29 @@ class DomainFronter:
                 pass
             raise
 
+    @staticmethod
+    def _inline_raw_body(payload: dict) -> dict:
+        """Fold a deferred `_raw` body back into a JSON-serializable dict.
+
+        The splice path in `_encode_relay_payload` cannot be used where the
+        payload is nested inside a larger structure, so batching pays the extra
+        copy. Only GETs without bodies are batched today, making this a no-op —
+        it is here so that stops being an invariant a distant caller has to
+        keep, since leaving `_raw` in would raise TypeError from json.dumps.
+        """
+        raw = payload.get("_raw")
+        if raw is None:
+            return payload
+        inlined = dict(payload)
+        inlined.pop("_raw")
+        inlined["b"] = base64.b64encode(raw).decode()
+        return inlined
+
     async def _relay_batch(self, payloads: list[dict]) -> list[bytes]:
         """Send multiple requests in one POST using Apps Script fetchAll."""
         batch_payload = {
             "k": self.auth_key,
-            "q": payloads,
+            "q": [self._inline_raw_body(p) for p in payloads],
         }
         json_body = json.dumps(batch_payload).encode()
         path = self._exec_path(payloads[0].get("u") if payloads else None)

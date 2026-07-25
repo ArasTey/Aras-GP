@@ -35,6 +35,7 @@ from constants import (
     LARGE_FILE_EXTS,
     MAX_HEADER_BYTES,
     MAX_REQUEST_BODY_BYTES,
+    MAX_UPLOAD_BODY_BYTES,
     SNI_REWRITE_SUFFIXES,
     STATIC_EXTS,
     TCP_CONNECT_TIMEOUT,
@@ -159,6 +160,12 @@ class ProxyServer:
             disk_mb=self._cfg_int(config, "cache_disk_mb", 512, minimum=0),
             disk_dir=config.get("cache_dir") or default_cache_dir(),
             disk_enabled=config.get("cache_enabled", True),
+        )
+        # Largest body the relay can actually carry. Configurable only because
+        # it tracks a Google quota that is theirs to change, not ours.
+        self._max_upload_body_bytes = self._cfg_int(
+            config, "max_upload_body_bytes", MAX_UPLOAD_BODY_BYTES,
+            minimum=64 * 1024,
         )
         # Collapses repeated identical relay failures in the log — see
         # _log_relay_failure.
@@ -369,6 +376,29 @@ class ProxyServer:
 
     #: How long identical relay failures collapse into one counted line.
     _RELAY_ERR_WINDOW = 30.0
+
+    def _upload_too_large_response(self, length: int) -> bytes:
+        """413 for a body the relay cannot carry, with the real ceiling in it.
+
+        Worth answering properly rather than dropping the connection: the limit
+        comes from Google's quota, not from anything the user can retry into, so
+        they need to be told the number instead of seeing a generic network
+        error after waiting for the whole upload.
+        """
+        limit = self._max_upload_body_bytes
+        body = (
+            f"Upload too large: {length / 1048576:.1f} MB. "
+            f"The relay can carry at most {limit / 1048576:.0f} MB per request, "
+            "because Apps Script caps one POST at 50 MB and the body is "
+            "base64-encoded on the way there.\r\n"
+        ).encode()
+        return (
+            b"HTTP/1.1 413 Payload Too Large\r\n"
+            b"Content-Type: text/plain\r\n"
+            b"Connection: close\r\n"
+            b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+            b"\r\n" + body
+        )
 
     def _log_relay_failure(self, url: str, exc: Exception) -> None:
         """Log a failed relay, collapsing repeats of the same cause.
@@ -1480,6 +1510,17 @@ class ProxyServer:
                 length = _parse_content_length(header_block)
                 if length > MAX_REQUEST_BODY_BYTES:
                     raise ValueError(f"Request body too large: {length} bytes")
+                # Refuse before reading the body: a doomed upload should not
+                # cost the user the transfer, nor the proxy the memory to hold
+                # it. Raising here instead only closed the socket, so the
+                # browser reported a generic network failure.
+                if length > self._max_upload_body_bytes:
+                    log.warning("Upload refused: %.1f MB exceeds the %.0f MB "
+                                "relay limit (%s)", length / 1048576,
+                                self._max_upload_body_bytes / 1048576, host)
+                    writer.write(self._upload_too_large_response(length))
+                    await writer.drain()
+                    break
                 if length > 0:
                     body = await reader.readexactly(length)
 
@@ -1731,8 +1772,14 @@ class ProxyServer:
             await writer.drain()
             return
         length = _parse_content_length(header_block)
-        if length > MAX_REQUEST_BODY_BYTES:
-            writer.write(b"HTTP/1.1 413 Content Too Large\r\n\r\n")
+        if length > self._max_upload_body_bytes:
+            # Same ceiling and the same explanation the MITM path gives; this
+            # one previously sent a bare status line with no Content-Length,
+            # which leaves the client waiting on a body that never comes.
+            log.warning("Upload refused (HTTP): %.1f MB exceeds the %.0f MB "
+                        "relay limit", length / 1048576,
+                        self._max_upload_body_bytes / 1048576)
+            writer.write(self._upload_too_large_response(length))
             await writer.drain()
             return
         if length > 0:

@@ -123,8 +123,7 @@ class PrettyFormatter(logging.Formatter):
 
     def _fmt_time(self, record: logging.LogRecord) -> str:
         t = time.localtime(record.created)
-        ms = int((record.created - int(record.created)) * 1000)
-        return f"{time.strftime('%H:%M:%S', t)}"
+        return time.strftime('%H:%M:%S', t)
 
     def _fmt_level(self, levelname: str) -> str:
         label = LEVEL_LABEL.get(levelname, levelname[:5].ljust(5))

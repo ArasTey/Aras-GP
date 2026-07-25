@@ -16,6 +16,16 @@ MAX_REQUEST_BODY_BYTES  = 100 * 1024 * 1024   # 100 MB  — inbound browser body
 MAX_RESPONSE_BODY_BYTES = 200 * 1024 * 1024   # 200 MB  — chunked response cap
 MAX_HEADER_BYTES        = 64 * 1024           # 64 KB
 
+# Google caps a single UrlFetchApp POST at 50 MB, and a body reaches it
+# base64'd — 4 bytes on the wire per 3 bytes of body. So the largest body that
+# can actually be relayed is 50 MB * 3/4 minus room for the JSON envelope
+# (method, URL and the client's headers), not the 100 MB above: an upload
+# between the two used to be accepted, buffered, sent in full and only then
+# refused by Google. Uploads are rejected up front against this instead.
+# Override with `max_upload_body_bytes` if Google changes the quota.
+RELAY_POST_LIMIT_BYTES  = 50 * 1024 * 1024    # 50 MB   — Apps Script hard cap
+MAX_UPLOAD_BODY_BYTES   = (RELAY_POST_LIMIT_BYTES // 4) * 3 - 256 * 1024
+
 
 # ── Timeouts (seconds) ────────────────────────────────────────────────────
 CLIENT_IDLE_TIMEOUT     = 120
