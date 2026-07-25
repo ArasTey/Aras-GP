@@ -13,12 +13,46 @@
 <div class="ar-note ar-note--warn" style="margin-bottom:var(--ar-s5)">
   {{ icon('alert', 16) }}
   <div>
-    <b>قبل از استفاده بخوانید.</b> این قابلیت از Cloudflare Workers به‌عنوان
-    سرور VLESS استفاده می‌کند. شرایط استفاده‌ی کلودفلر پروکسی عمومی را مجاز
-    نمی‌داند و ممکن است Worker یا حساب شما محدود یا مسدود شود. مسئولیت این
-    انتخاب با خود شماست.
+    <b>این قابلیت پیش‌فرض خاموش است و باید خودتان روشنش کنید.</b>
+    از Cloudflare Workers به‌عنوان سرور VLESS استفاده می‌کند، و شرایط استفاده‌ی
+    کلودفلر پروکسی عمومی را مجاز نمی‌داند — ممکن است <b>Worker یا کل حساب
+    کلودفلرتان مسدود شود</b>. تا روشنش نکنید و یک بار دیپلوی نکنید، Worker هیچ
+    کلاینت VLESS را نمی‌پذیرد. مسئولیت این انتخاب با خود شماست.
   </div>
 </div>
+
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">
+      {{ icon('shield' if vless.enabled else 'ban', 18) }} وضعیت قابلیت
+    </h2>
+    <span class="ar-pill {{ 'ar-pill--on' if vless.enabled else 'ar-pill--off' }}">
+      {{ 'روشن' if vless.enabled else 'خاموش' }}
+    </span>
+  </div>
+
+  {% if vless.enabled %}
+    <p class="ar-card__sub">
+      سرور VLESS روی Worker شما فعال است. برای خاموش‌کردن، دکمه‌ی زیر را بزنید —
+      همان لحظه روی Worker هم اعمال می‌شود و همه‌ی کانفیگ‌ها از کار می‌افتند.
+    </p>
+    <button class="ar-btn ar-btn--danger" id="vless-toggle" data-on="1" type="button">
+      {{ icon('ban', 15) }}<span>خاموش کردن</span>
+    </button>
+  {% else %}
+    <p class="ar-card__sub">
+      خاموش است، پس Worker شما هیچ کلاینت VLESS را نمی‌پذیرد و لینکی ساخته
+      نمی‌شود. با روشن‌کردن، UUID دوستانتان به Worker بایند می‌شود.
+    </p>
+    <button class="ar-btn ar-btn--primary" id="vless-toggle" data-on="0" type="button">
+      {{ icon('check', 15) }}<span>می‌پذیرم و روشن می‌کنم</span>
+    </button>
+    <span class="ar-hint" style="margin-top:var(--ar-s3);display:block">
+      با زدن این دکمه می‌پذیرید که ممکن است حساب کلودفلرتان به‌خاطر نقض شرایط
+      استفاده محدود شود.
+    </span>
+  {% endif %}
+</section>
 
 {% if not has_worker %}
   <div class="ar-note ar-note--warn">
@@ -27,6 +61,14 @@
       هنوز Worker دیپلوی نشده است. اول از صفحه‌ی
       <a href="{{ url_for('deploy_page') }}">دیپلوی</a> یک Worker بسازید،
       بعد اینجا برگردید.
+    </div>
+  </div>
+{% elif not vless.enabled %}
+  <div class="ar-note">
+    {{ icon('info', 16) }}
+    <div>
+      قابلیت خاموش است، پس لینکی ساخته نمی‌شود. بالا روشنش کنید تا فهرست
+      دوستان و لینک اشتراک ظاهر شوند.
     </div>
   </div>
 {% else %}
@@ -163,6 +205,21 @@
 <script nonce="{{ csp_nonce() }}">
 (function () {
   function reload() { setTimeout(function () { location.reload(); }, 700); }
+
+  var toggleBtn = document.getElementById("vless-toggle");
+  Aras.action(toggleBtn, function () {
+    var turningOn = toggleBtn.dataset.on === "0";
+    // Turning it on can get the operator's Cloudflare account restricted, so
+    // it takes a deliberate second step rather than one stray click.
+    if (turningOn && !confirm(
+        "سرور VLESS روی Worker شما روشن می‌شود.\n\n" +
+        "شرایط استفاده‌ی کلودفلر پروکسی عمومی را مجاز نمی‌داند و ممکن است " +
+        "Worker یا کل حساب کلودفلرتان مسدود شود.\n\nادامه می‌دهید؟")) {
+      return;
+    }
+    return Aras.post("/api/friends/enable", { enabled: turningOn ? "1" : "0" })
+      .then(function (d) { if (Aras.report(d)) reload(); });
+  });
 
   Aras.action(document.getElementById("friend-add"), function () {
     var name = (document.getElementById("friend-name") || {}).value || "";

@@ -195,7 +195,19 @@ def list_clients() -> list[dict]:
 
 
 def uuids() -> list[str]:
-    """Every enabled client's UUID — what the Worker is told to accept."""
+    """Every enabled client's UUID — what the Worker is told to accept.
+
+    Empty while the feature is switched off, which is the default. The Worker
+    refuses every VLESS client when this binding is empty, so off here means
+    off there: the VLESS server does not exist until the operator has read what
+    it costs them and turned it on deliberately.
+
+    The master switch is checked here rather than at the call sites because
+    this is the single value the Worker's behaviour derives from — gating
+    anywhere else would leave a path that still armed it.
+    """
+    if not settings()["enabled"]:
+        return []
     return [c["uuid"] for c in list_clients()
             if c.get("enabled", True) and c.get("uuid")]
 
@@ -308,6 +320,14 @@ def vless_link(client: dict, host: str = "", path: str = "",
 
 
 def all_links(host: str = "", path: str = "") -> list[str]:
+    """Every working link. Empty while the feature is off.
+
+    Handing out links the Worker is going to refuse would send friends off to
+    debug a config that cannot work, so there is nothing to copy until the
+    switch is on and a deploy has armed the Worker.
+    """
+    if not settings()["enabled"]:
+        return []
     host = host or _worker_host()
     path = path or settings()["path"]
     out = []

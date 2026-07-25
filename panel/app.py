@@ -972,9 +972,25 @@ def create_app() -> Flask:
     @app.post("/api/friends/enable")
     @security.login_required
     def api_friends_enable():
-        clients.set_enabled(str(_json_body().get("enabled", "")).lower()
-                            in ("1", "true", "on"))
-        return _ok()
+        """Arm or disarm the Worker's VLESS server.
+
+        The switch is what binds or clears VLESS_UUIDS, so it has to reach the
+        Worker to mean anything — flipping it locally would leave the previous
+        state armed on Cloudflare. Off is the default and the safe direction:
+        an operator who turns it off wants it off now, not after they remember
+        to redeploy.
+        """
+        on = str(_json_body().get("enabled", "")).lower() in ("1", "true", "on")
+        clients.set_enabled(on)
+        applied = _push_clients_to_worker()
+        if on:
+            message = (
+                "روشن شد. " + applied + " تا وقتی Worker دیپلوی نشده باشد، "
+                "کانفیگ‌ها جواب نمی‌دهند."
+            )
+        else:
+            message = "خاموش شد. " + applied
+        return _ok(enabled=on, message=message)
 
     @app.post("/api/friends/path")
     @security.login_required
