@@ -19,16 +19,25 @@
   Mixing them in one list was how the second one got switched on by people who
   only wanted the first.
 #}
+{#
+  Two modes for two situations, not one product with a side feature.
+
+  Share is the ordinary case: straight to a Cloudflare Worker, fast, and what
+  most people want. Relay is for when that stops working — every request goes
+  out as a TLS connection to Google, which is far harder to block and much
+  slower for it. Naming the situation in the menu is what lets someone pick
+  correctly without reading the guide first.
+#}
 {% set nav_groups = [
-  ('رله — ترافیک خودتان', [
+  ('اشتراک — شرایط عادی', [
+    ('friends_page', 'کانفیگ و لینک', 'link'),
+  ]),
+  ('رله — شرایط سخت', [
     ('dashboard',    'داشبورد',      'gauge'),
     ('status_page',  'وضعیت',        'pulse'),
     ('deploy_page',  'دیپلوی رله',   'rocket'),
     ('config_page',  'تنظیمات رله',  'sliders'),
     ('users_page',   'کاربران رله',  'users'),
-  ]),
-  ('اشتراک — برای دیگران', [
-    ('friends_page', 'کانفیگ‌ها',     'link'),
   ]),
   ('عمومی', [
     ('settings_page','تنظیمات پنل',  'gear'),

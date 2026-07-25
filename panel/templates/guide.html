@@ -30,6 +30,62 @@
   </div>
 </header>
 
+<!-- کدام حالت -->
+<section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
+  <div class="ar-card__head">
+    <h2 class="ar-card__title">{{ icon('sliders', 18) }} کدام حالت را لازم دارید؟</h2>
+  </div>
+  <p class="ar-card__sub">
+    این پروژه دو مسیر جدا دارد که برای دو وضعیت مختلف ساخته شده‌اند. لازم نیست
+    هر دو را راه بیندازید — با آن که به وضعیت شما می‌خورد شروع کنید.
+  </p>
+
+  <div class="ar-grid ar-grid--2" style="gap:var(--ar-s4)">
+    <div class="ar-card" style="background:var(--ar-glass-soft)">
+      <h3 style="margin:0 0 var(--ar-s2)">
+        {{ icon('link', 16) }} اشتراک — شرایط عادی
+      </h3>
+      <p class="ar-hint" style="margin:0 0 var(--ar-s3)">
+        گوشی یا مرورگر مستقیم به Cloudflare Worker شما وصل می‌شود.
+      </p>
+      <ul style="margin:0 0 var(--ar-s3);padding-inline-start:20px;line-height:1.9">
+        <li><b>سریع</b> — بدون واسطه‌ی اضافه</li>
+        <li>سقف <b>۱۰۰٬۰۰۰</b> درخواست در روز</li>
+        <li>روی گوشی هم کار می‌کند</li>
+        <li class="ar-hint">ضعف: workers.dev بلاک‌شدنی است — با نشانی تمیز دور می‌خورد</li>
+        <li class="ar-hint">ریسک: نقض شرایط کلودفلر، احتمال مسدودی حساب</li>
+      </ul>
+      <a class="ar-btn ar-btn--primary ar-btn--sm" href="{{ url_for('friends_page') }}">
+        {{ icon('arrow', 14) }}<span>رفتن به اشتراک</span>
+      </a>
+    </div>
+
+    <div class="ar-card" style="background:var(--ar-glass-soft)">
+      <h3 style="margin:0 0 var(--ar-s2)">
+        {{ icon('shield', 16) }} رله — شرایط سخت
+      </h3>
+      <p class="ar-hint" style="margin:0 0 var(--ar-s3)">
+        ترافیک به شکل یک اتصال TLS معمولی به گوگل بیرون می‌رود.
+      </p>
+      <ul style="margin:0 0 var(--ar-s3);padding-inline-start:20px;line-height:1.9">
+        <li><b>سخت‌ترین برای بلاک‌کردن</b> — ISP فقط گوگل می‌بیند</li>
+        <li>ریسک کم؛ Apps Script سرویس عادی گوگل است</li>
+        <li>وقتی مسیرهای دیگر جواب نمی‌دهند</li>
+        <li class="ar-hint">ضعف: کندتر — هر درخواست یک رفت‌وبرگشت به گوگل</li>
+        <li class="ar-hint">سقف: <b>۲۰٬۰۰۰</b> فراخوان در روز</li>
+      </ul>
+      <a class="ar-btn ar-btn--sm" href="{{ url_for('deploy_page') }}">
+        {{ icon('arrow', 14) }}<span>رفتن به رله</span>
+      </a>
+    </div>
+  </div>
+
+  <span class="ar-hint" style="margin-top:var(--ar-s4);display:block">
+    هر دو روی حساب کلودفلر خودتان اجرا می‌شوند ولی <b>Worker جدا</b> دارند —
+    اگر Worker اشتراک برداشته شود، رله دست‌نخورده کار می‌کند.
+  </span>
+</section>
+
 <!-- پیشرفت -->
 <section class="ar-card ar-reveal" style="margin-bottom:var(--ar-s5)">
   <div class="ar-card__head">
