@@ -392,10 +392,69 @@ def install_deps() -> bool:
     return True
 
 
+def latest_tag() -> str | None:
+    """Newest release tag, or None when there are none (or no git).
+
+    Sorted by version rather than by date: a tag moved onto a newer commit
+    keeps its own version's place in the ordering, which is what makes the
+    latest-tag-is-mutable convention safe to rely on here.
+    """
+    if not have_git():
+        return None
+    out = subprocess.run(["git", "tag", "--sort=-v:refname"],
+                         cwd=str(ROOT), capture_output=True, text=True)
+    tags = [t for t in out.stdout.split() if t.strip()]
+    return tags[0] if tags else None
+
+
+def checkout_latest_tag() -> bool:
+    """Move the working tree onto the newest release tag.
+
+    A fresh clone lands on the default branch, which is wherever development
+    happens to be — installing from it means installing something that was
+    never released. `--force` on the fetch matters: git will not move a tag it
+    already has, so the newest tag being repointed at a newer commit would
+    otherwise never arrive.
+    """
+    if not have_git():
+        return False
+    _run(["git", "fetch", "--tags", "--force", "--quiet"])
+    tag = latest_tag()
+    if not tag:
+        print(yellow("  No release tags found — staying on the current branch."))
+        return False
+
+    current = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(ROOT),
+                             capture_output=True, text=True).stdout.strip()
+    target = subprocess.run(["git", "rev-parse", f"{tag}^{{commit}}"],
+                            cwd=str(ROOT), capture_output=True,
+                            text=True).stdout.strip()
+    if current and current == target:
+        print(green(f"  Already on the latest release ({tag})."))
+        return True
+
+    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT),
+                           capture_output=True, text=True).stdout.strip()
+    if dirty:
+        print(yellow("  You have local changes, so the release checkout was "
+                     "skipped to avoid discarding them."))
+        print(dim("    Commit or stash them, then run Install again."))
+        return False
+
+    print(blue(f"  Checking out the latest release: {tag}"))
+    if _run(["git", "checkout", "--quiet", tag]) != 0:
+        print(yellow(f"  Could not check out {tag} — staying where you are."))
+        return False
+    return True
+
+
 def action_install() -> None:
     _header("Install")
     if venv_ready():
         print(yellow("  Environment already exists; just updating dependencies."))
+    # Install the newest release, not whatever the default branch currently
+    # holds — a clone puts you on main, which is not a released state.
+    checkout_latest_tag()
     if not install_deps():
         return
     # Create the global command right away, without asking — the whole point
@@ -410,15 +469,29 @@ def action_install() -> None:
 def action_update() -> None:
     _header("Update")
     was_running = is_running()
-    if have_git():
-        print(blue("  Pulling the latest version from GitHub..."))
-        _run(["git", "fetch", "--tags", "--quiet"])
+    if not have_git():
+        print(yellow("  Git is not active here. To update, clone/download again."))
+        return
+
+    print(blue("  Fetching releases from GitHub..."))
+    # --force because the newest tag moves: a fix that does not change the
+    # version repoints it, and git leaves a tag it already has alone otherwise,
+    # so those updates would silently never arrive.
+    _run(["git", "fetch", "--tags", "--force", "--quiet"])
+
+    # Detached at a tag is the normal state after Install, and `git pull` has
+    # no branch to fast-forward there — it fails with a message about no
+    # tracking information, which read as "update is broken".
+    on_branch = subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "HEAD"],
+        cwd=str(ROOT), capture_output=True, text=True,
+    ).returncode == 0
+    if on_branch:
         if _run(["git", "pull", "--ff-only"]) != 0:
             print(yellow("  Fast-forward pull failed — you may have local changes."))
             print(yellow("  Resolve it by hand, or use 'Specific version' instead."))
             return
-    else:
-        print(yellow("  Git is not active here. To update, clone/download again."))
+    elif not checkout_latest_tag():
         return
     install_deps()
     print(green(f"  You are now on version {read_version()}."))

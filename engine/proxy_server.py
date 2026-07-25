@@ -44,6 +44,79 @@ from domain_fronter import DomainFronter
 
 log = logging.getLogger("Proxy")
 
+
+#: Served to any device that opens http://aras.ca through this proxy. Self
+#: contained on purpose: a phone that has not trusted the CA yet cannot load a
+#: stylesheet or a font over HTTPS, so anything external would render broken at
+#: exactly the moment it needs to be readable.
+_CA_HELP_HTML = """<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>نصب گواهی Aras-GP</title>
+<style>
+ :root{color-scheme:dark light}
+ body{margin:0;padding:24px 18px;font:16px/1.75 -apple-system,BlinkMacSystemFont,
+      "Segoe UI",Roboto,sans-serif;background:#0f1020;color:#f1f2ff}
+ .w{max-width:640px;margin:0 auto}
+ h1{font-size:1.4rem;margin:0 0 4px}
+ .sub{color:#a9adc9;margin:0 0 22px}
+ a.btn{display:block;text-align:center;background:#2f83f6;color:#fff;
+   text-decoration:none;padding:15px;border-radius:12px;font-weight:600;
+   margin:0 0 26px}
+ h2{font-size:1.05rem;margin:26px 0 8px;padding-bottom:6px;
+    border-bottom:1px solid rgba(255,255,255,.12)}
+ ol{margin:0;padding-inline-start:22px}
+ li{margin:7px 0}
+ code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:5px;
+      font-size:.9em;direction:ltr;display:inline-block}
+ .warn{background:rgba(255,138,61,.12);border:1px solid rgba(255,138,61,.4);
+   border-radius:10px;padding:12px 14px;margin:14px 0}
+ .warn b{color:#ffa257}
+ footer{margin-top:28px;color:#6f7495;font-size:.85rem}
+ @media (prefers-color-scheme:light){
+   body{background:#f6f7fb;color:#14152a}.sub{color:#555a75}
+   code{background:rgba(0,0,0,.07)}footer{color:#767a92}
+ }
+</style></head><body><div class="w">
+<h1>نصب گواهی Aras-GP</h1>
+<p class="sub">تا این گواهی را نصب و «اعتماد کامل» نکنید، سایت‌های HTTPS روی این
+دستگاه خطای گواهی می‌دهند.</p>
+
+<a class="btn" href="/aras-gp-ca.crt">دانلود گواهی</a>
+
+<h2>آیفون و آیپد</h2>
+<ol>
+<li>دکمه‌ی بالا را بزنید و <b>Allow</b> را تأیید کنید.</li>
+<li><code>Settings › General › VPN &amp; Device Management</code> — پروفایل
+    دانلود‌شده را باز کنید و <b>Install</b> بزنید.</li>
+<li class="warn"><b>این مرحله را جا نیندازید:</b>
+    <code>Settings › General › About › Certificate Trust Settings</code> و
+    کلید <b>Aras-GP</b> را روشن کنید. بدون این مرحله گواهی نصب می‌شود ولی
+    iOS همچنان قبولش نمی‌کند — دلیل اصلی «cert error» بعد از نصب همین است.</li>
+</ol>
+
+<h2>اندروید</h2>
+<ol>
+<li>دکمه‌ی بالا را بزنید تا فایل ذخیره شود.</li>
+<li><code>Settings › Security › Encryption &amp; credentials ›
+    Install a certificate › CA certificate</code></li>
+<li>هشدار را بپذیرید و فایل <code>aras-gp-ca.crt</code> را انتخاب کنید.</li>
+</ol>
+<p class="sub">در بعضی گوشی‌ها این مسیر زیر
+<code>Settings › Security › More settings</code> است.</p>
+
+<h2>ویندوز</h2>
+<ol>
+<li>فایل را دانلود و روی آن دوبار کلیک کنید.</li>
+<li><b>Install Certificate › Local Machine › Place all certificates in the
+    following store › Trusted Root Certification Authorities</b></li>
+</ol>
+
+<footer>این گواهی فقط روی همین دستگاه معنا دارد و کلید خصوصی‌اش هرگز از
+کامپیوتر شما بیرون نمی‌رود.</footer>
+</div></body></html>
+"""
+
 # How often the account sweeper checks for users that ran out of quota or
 # whose subscription expired while they were connected.
 ACCOUNT_SWEEP_INTERVAL = 5.0
@@ -372,6 +445,47 @@ class ProxyServer:
 
     #: How long identical relay failures collapse into one counted line.
     _RELAY_ERR_WINDOW = 30.0
+
+    #: Hostnames that serve the CA instead of being relayed. Reached over plain
+    #: HTTP by a device already using this proxy, so no DNS entry is needed —
+    #: the proxy sees the name in the request line and answers it itself.
+    _CA_HOSTS = frozenset({"aras.ca", "ca.aras", "aras.it", "cert.aras"})
+
+    def _is_ca_host(self, host: str) -> bool:
+        name = (host or "").strip().rstrip(".").lower()
+        if ":" in name:
+            name = name.rsplit(":", 1)[0]
+        return name in self._CA_HOSTS
+
+    def _ca_help_response(self, path: str) -> bytes:
+        """The CA file itself, or a page explaining how to trust it."""
+        from mitm import CA_CERT_FILE
+
+        try:
+            with open(CA_CERT_FILE, "rb") as handle:
+                pem = handle.read()
+        except OSError:
+            body = ("گواهی CA هنوز ساخته نشده است. یک بار رله را اجرا کنید تا "
+                    "ساخته شود، سپس این صفحه را دوباره باز کنید.").encode()
+            return (b"HTTP/1.1 503 Service Unavailable\r\n"
+                    b"Content-Type: text/plain; charset=utf-8\r\n"
+                    b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                    b"Connection: close\r\n\r\n" + body)
+
+        # iOS will not open the installer unless the type is exactly this, and
+        # Android needs the .crt name to offer "install certificate".
+        if path.rstrip("/").endswith((".crt", ".pem", "/cert", "/ca")):
+            return (b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/x-x509-ca-cert\r\n"
+                    b'Content-Disposition: attachment; filename="aras-gp-ca.crt"\r\n'
+                    b"Content-Length: " + str(len(pem)).encode() + b"\r\n"
+                    b"Connection: close\r\n\r\n" + pem)
+
+        html = _CA_HELP_HTML.encode("utf-8")
+        return (b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/html; charset=utf-8\r\n"
+                b"Content-Length: " + str(len(html)).encode() + b"\r\n"
+                b"Connection: close\r\n\r\n" + html)
 
     def _upload_too_large_response(self, length: int) -> bytes:
         """413 for a body the relay cannot carry, with the real ceiling in it.
@@ -823,6 +937,23 @@ class ProxyServer:
             log.warning("BLOCKED → %s:%d (matches block_hosts)", host, port)
             try:
                 writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+            except Exception:
+                pass
+            return
+
+        if self._is_ca_host(host):
+            # Only reachable over plain HTTP: serving it under TLS would need
+            # the very certificate the device has not trusted yet.
+            log.info("CA help page requested over TLS for %s — telling the "
+                     "client to use http:// instead", host)
+            body = ("برای نصب گواهی از نشانی http://aras.ca استفاده کنید "
+                    "(بدون s در https).").encode()
+            try:
+                writer.write(b"HTTP/1.1 400 Bad Request\r\n"
+                             b"Content-Type: text/plain; charset=utf-8\r\n"
+                             b"Content-Length: " + str(len(body)).encode() +
+                             b"\r\nConnection: close\r\n\r\n" + body)
                 await writer.drain()
             except Exception:
                 pass
@@ -1794,6 +1925,22 @@ class ProxyServer:
             if b":" in raw_line:
                 k, v = raw_line.decode(errors="replace").split(":", 1)
                 headers[k.strip()] = v.strip()
+
+        # A phone using this proxy cannot fetch the CA from the panel: the
+        # panel wants a login and binds to loopback. Serving it here instead
+        # means any device already pointed at the proxy can install trust by
+        # opening one plain-HTTP address — the same trick mitmproxy uses for
+        # mitm.it, and the only practical route on iOS and Android.
+        #
+        # A proxied request carries an absolute URL, but the Host header is
+        # what a client sends when it thinks it is talking to an origin, so
+        # both are checked.
+        _parsed = urlparse(url if "://" in url else "")
+        _ca_host = _parsed.hostname or self._header_value(headers, "host")
+        if self._is_ca_host(_ca_host):
+            writer.write(self._ca_help_response(_parsed.path or url))
+            await writer.drain()
+            return
 
         # ── CORS preflight over plain HTTP ─────────────────────────────
         origin = self._header_value(headers, "origin")
