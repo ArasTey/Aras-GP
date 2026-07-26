@@ -179,6 +179,15 @@ async function onClientChunk(chunk, ws, remote, uuids, markParsed) {
         safeClose(ws);
         return null;
     }
+    // The destination is whatever the client asked for, which is the point of
+    // a proxy — but "anywhere" should not include the inside of Cloudflare's
+    // network or anyone's LAN. An authenticated client could otherwise use
+    // this Worker to reach addresses that are not on the public internet.
+    if (isPrivateDestination(parsed.address)) {
+        safeClose(ws);
+        return null;
+    }
+
     markParsed();
 
     // VLESS reply: [version, addon-length=0]. Sent once, ahead of real data.
@@ -198,8 +207,53 @@ async function onClientChunk(chunk, ws, remote, uuids, markParsed) {
     return socket;
 }
 
+// Destinations that are not on the public internet. Checked on the literal
+// address the client sent: a hostname that resolves into one of these still
+// gets through, so this is a guard against the obvious attempt rather than a
+// complete boundary — the complete one would need resolution the Worker
+// runtime does not offer before connect().
+function isPrivateDestination(address) {
+    const host = String(address || "").toLowerCase().replace(/^\[|\]$/g, "");
+    if (!host) return true;
+
+    if (host === "localhost" || host.endsWith(".localhost")
+        || host.endsWith(".local") || host.endsWith(".internal")) {
+        return true;
+    }
+
+    // IPv6 loopback, unspecified, unique-local (fc00::/7), link-local (fe80::/10).
+    if (host.includes(":")) {
+        if (host === "::1" || host === "::") return true;
+        const head = host.split(":")[0];
+        if (/^f[cd]/.test(head)) return true;
+        if (/^fe[89ab]/.test(head)) return true;
+        return false;
+    }
+
+    const parts = host.split(".");
+    if (parts.length !== 4 || !parts.every(p => /^\d{1,3}$/.test(p))) {
+        return false;                       // a domain name; nothing to judge
+    }
+    const [a, b] = parts.map(Number);
+    if (parts.some(p => Number(p) > 255)) return true;
+    if (a === 0 || a === 10 || a === 127) return true;          // this net, private, loopback
+    if (a === 169 && b === 254) return true;                    // link-local
+    if (a === 172 && b >= 16 && b <= 31) return true;           // private
+    if (a === 192 && b === 168) return true;                    // private
+    if (a === 100 && b >= 64 && b <= 127) return true;          // CGNAT
+    if (a === 198 && (b === 18 || b === 19)) return true;        // benchmark
+    if (a >= 224) return true;                                  // multicast, reserved
+    return false;
+}
+
+// These bytes come off the wire from whoever connected, so every field is
+// read only after checking the buffer actually reaches that far. Without the
+// checks a truncated header walked past the end: reads return undefined,
+// `undefined << 8` is 0, and the parse yielded port 0 or a domain cut short —
+// a dial to somewhere nobody asked for, from a header the sender controls.
 function parseVlessHeader(bytes, uuids) {
-    if (bytes.length < 24) return { error: "short" };
+    // version(1) + uuid(16) + addonLen(1) + command(1) + port(2) + type(1)
+    if (bytes.length < 23) return { error: "short" };
 
     const version = bytes[0];
     const uuid = bytesToHex(bytes.subarray(1, 17));
@@ -207,6 +261,8 @@ function parseVlessHeader(bytes, uuids) {
 
     const addonLen = bytes[17];
     let i = 18 + addonLen;
+    // command(1) + port(2) + type(1) must still fit.
+    if (i + 4 > bytes.length) return { error: "short" };
 
     const command = bytes[i++];
     // 1 = TCP. UDP (2) is used mainly for DNS; browsing works over TCP, and
@@ -215,17 +271,24 @@ function parseVlessHeader(bytes, uuids) {
 
     const port = (bytes[i] << 8) | bytes[i + 1];
     i += 2;
+    if (port === 0) return { error: "port" };
 
     const type = bytes[i++];
     let address = "";
     if (type === 1) {                       // IPv4
+        if (i + 4 > bytes.length) return { error: "short" };
         address = `${bytes[i]}.${bytes[i + 1]}.${bytes[i + 2]}.${bytes[i + 3]}`;
         i += 4;
     } else if (type === 2) {                // domain name
+        if (i + 1 > bytes.length) return { error: "short" };
         const len = bytes[i++];
+        // subarray would clamp silently and hand back a truncated name, which
+        // resolves to something other than what was asked for.
+        if (len === 0 || i + len > bytes.length) return { error: "short" };
         address = new TextDecoder().decode(bytes.subarray(i, i + len));
         i += len;
     } else if (type === 3) {                // IPv6
+        if (i + 16 > bytes.length) return { error: "short" };
         const parts = [];
         for (let j = 0; j < 8; j++) {
             parts.push(((bytes[i + j * 2] << 8) | bytes[i + j * 2 + 1]).toString(16));
@@ -236,6 +299,7 @@ function parseVlessHeader(bytes, uuids) {
         return { error: "addr-type" };
     }
 
+    if (!address) return { error: "addr" };
     return { version, port, address, payload: bytes.subarray(i) };
 }
 

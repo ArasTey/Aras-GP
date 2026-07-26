@@ -92,6 +92,13 @@ def normalize_path(path, fallback: str = "") -> str:
         text = "/" + text
     if not re.fullmatch(r"/[A-Za-z0-9._~\-/]{1,120}", text):
         return fallback
+    # The Worker compares this literally, so anything a client might rewrite
+    # before sending has to be refused here or the config silently stops
+    # matching. Clients collapse "//" and resolve "..", and a path that has
+    # been resolved on the way out no longer equals the one bound to the
+    # Worker — which fails as "config does not work", far from the cause.
+    if ".." in text.split("/") or "//" in text:
+        return fallback
     return text.rstrip("/") or "/"
 
 

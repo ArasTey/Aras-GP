@@ -17,10 +17,13 @@ import uuid as _uuid
 
 from . import store
 
-#: Friend names are labels, not identifiers — they end up in the link fragment
-#: and nowhere else. Persian writes half-spaces (U+200C) inside ordinary words
-#: like «لپ‌تاپ», so rejecting that character rejects normal names.
-NAME_RE = re.compile(r"^[\w .\-()‌‏آ-یءؤئٔ]{1,40}$", re.UNICODE)
+#: Friend names are labels, not identifiers. Persian writes a half-space
+#: (U+200C ZWNJ) inside ordinary words, so rejecting it would reject normal
+#: names. It is spelled as an escape rather than typed literally: an invisible
+#: character in source cannot be reviewed, and bidi controls in particular are
+#: how source is made to read differently from what it does. U+200F (RLM) used
+#: to be in here too and is gone — it is a display control, never part of a name.
+NAME_RE = re.compile("^[\\w .\\-()\u200c\u0622-\u06cc\u0621\u0624\u0626\u0654]{1,40}$", re.UNICODE)
 
 class ClientError(ValueError):
     """Raised with a Persian, user-facing message."""
