@@ -24,6 +24,11 @@
 // The paths are per-deployment random strings rather than anything guessable,
 // so scanning workers.dev for a known path finds nothing.
 
+// The VLESS session opens a raw TCP socket to the destination from
+// Cloudflare's edge, which is the one capability that makes this work without
+// a VPS.
+import { connect } from "cloudflare:sockets";
+
 export default {
     async fetch(request, env) {
         try {
@@ -110,7 +115,10 @@ function normalizeUuid(u) {
 async function handleVless(request, env) {
     const uuids = allowedUuids(env);
     if (uuids.length === 0) {
-        return new Response("not configured", { status: 503 });
+        // Same blank 200 as any unrecognised request. A distinct "not
+        // configured" told a prober that a real deployment lived here and was
+        // merely unarmed, which is exactly the fact worth withholding.
+        return blank();
     }
 
     const pair = new WebSocketPair();

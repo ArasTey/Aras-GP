@@ -677,11 +677,7 @@ def create_app() -> Flask:
 
         try:
             token = _cf_token(body)
-            # Bind the friends' UUIDs so the redeployed Worker keeps serving
-            # their VLESS links; without this a deploy would silently revoke
-            # every friend.
-            result = cloudflare.deploy(token, account_id, script_name,
-                                       vless_uuids=clients.uuids())
+            result = cloudflare.deploy(token, account_id, script_name)
         except ValueError as exc:
             return _fail(str(exc))
         except cloudflare.CloudflareError as exc:
@@ -912,37 +908,47 @@ def create_app() -> Flask:
     # ── friends (VLESS over the Worker) ───────────────────────────────
 
     def _push_clients_to_worker() -> str:
-        """Re-upload the Worker with the current UUID set.
+        """Re-upload the *share* Worker so it knows the current client set.
 
-        A Cloudflare binding can only change by re-uploading the script, so
-        every add/remove/rotate has to reach the Worker this way. Needs a token
-        and a prior deploy; without either, the friend is stored locally and
-        the operator is told to redeploy from the Deploy page.
+        A Cloudflare binding only changes by re-uploading the script, so every
+        add, removal and rotation has to reach the Worker this way.
 
-        The token is taken from the session as well as from disk. Reading only
-        the saved one meant that with "remember token" off — the default — a new
-        friend never reached the Worker, which then answered their config with
-        "not configured" and looked like the link itself was wrong.
+        This used to re-upload the relay's Worker instead, which stopped being
+        the VLESS server when the two were split — so adding a friend was
+        rewriting the deployment the operator's own traffic depends on, to
+        deliver a binding it no longer reads.
+
+        Nothing to push before the share Worker has been deployed once: it has
+        no name or paths yet, and inventing them here would strand every config
+        already handed out.
         """
-        state = store.load()
-        cf = state.get("cloudflare") or {}
+        share = _share_state()
+        if not share.get("script_name"):
+            return ("ذخیره شد. برای اعمال، از همین صفحه Worker اشتراک را "
+                    "دیپلوی کنید.")
         token = _cf_token_quiet()
-        account_id = cf.get("account_id") or ""
-        script_name = cf.get("script_name") or ""
-        if not (token and account_id and script_name):
+        account_id = (store.load().get("cloudflare") or {}).get("account_id") or ""
+        if not (token and account_id):
             return ("ذخیره شد، ولی روی Worker اعمال نشد چون توکن کلودفلر در "
-                    "دست نیست. از صفحه‌ی دیپلوی یک بار دوباره دیپلوی کنید تا "
-                    "این دوست برای Worker شناخته شود.")
+                    "دست نیست. یک بار در صفحه‌ی دیپلوی رله واردش کنید، بعد "
+                    "اینجا دوباره دیپلوی کنید.")
         try:
-            subdomain = cf.get("workers_subdomain") or ""
-            source = cloudflare.render_worker(script_name, subdomain)
-            cloudflare.upload_script(token, account_id, script_name, source,
-                                     vless_uuids=clients.uuids())
+            share_worker.deploy(
+                token, account_id,
+                clients=clients.list_clients(),
+                addresses=share.get("addresses") or [],
+                script_name=share["script_name"],
+                ws_path=share.get("ws_path", ""),
+                sub_path=share.get("sub_path", ""),
+                alpn=share.get("alpn", share_sub.DEFAULT_ALPN),
+                fingerprint=share.get("fingerprint",
+                                      share_sub.DEFAULT_FINGERPRINT),
+            )
         except cloudflare.CloudflareError as exc:
-            return f"روی Worker اعمال نشد: {exc.message}"
+            return f"روی Worker اشتراک اعمال نشد: {exc.message}"
         except Exception as exc:  # noqa: BLE001 — surface, don't 500
-            return f"روی Worker اعمال نشد: {exc}"
-        return "ذخیره و روی Worker اعمال شد."
+            return f"روی Worker اشتراک اعمال نشد: {exc}"
+        return "ذخیره و روی Worker اشتراک اعمال شد."
 
     # ── share: its own Worker, its own state ──────────────────────────
     # Every route below writes only the "share" section and share/'s own

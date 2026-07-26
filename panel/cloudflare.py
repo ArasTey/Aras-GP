@@ -257,24 +257,18 @@ def validate_script_name(name: str) -> str:
 
 
 def upload_script(token: str, account_id: str, script_name: str,
-                  source: str, vless_uuids: list[str] | None = None) -> dict:
+                  source: str) -> dict:
     """``PUT /accounts/{id}/workers/scripts/{name}`` with an ES-module payload.
 
-    ``vless_uuids`` are bound as ``VLESS_UUIDS`` so the Worker's VLESS server
-    accepts exactly the panel's friends and no one else. With none bound the
-    Worker refuses every VLESS client — it never becomes an open proxy.
+    No bindings: the relay Worker reads none. It used to be handed the share
+    clients' UUIDs, which stopped meaning anything when the VLESS server moved
+    to its own deployment — and until now was still copying those identities
+    into a Worker that ignores them.
     """
-    bindings = []
-    if vless_uuids:
-        bindings.append({
-            "type": "plain_text",
-            "name": "VLESS_UUIDS",
-            "text": json.dumps(list(vless_uuids)),
-        })
     metadata = {
         "main_module": "worker.js",
         "compatibility_date": COMPATIBILITY_DATE,
-        "bindings": bindings,
+        "bindings": [],
     }
 
     files = {
@@ -457,7 +451,7 @@ def resolve_account_id(token: str, account_id: str = "") -> str:
 
 
 def deploy(token: str, account_id: str, script_name: str,
-           vless_uuids: list[str] | None = None) -> dict:
+) -> dict:
     """Full deploy. Returns the public worker URL and the steps that ran."""
     script_name = validate_script_name(script_name)
 
@@ -483,10 +477,8 @@ def deploy(token: str, account_id: str, script_name: str,
     )
 
     source = render_worker(script_name, subdomain)
-    upload_script(token, account_id, script_name, source, vless_uuids)
+    upload_script(token, account_id, script_name, source)
     detail = f"{len(source)} بایت"
-    if vless_uuids:
-        detail += f" + {len(vless_uuids)} کلاینت VLESS"
     record("آپلود اسکریپت", True, detail)
 
     enable_workers_dev(token, account_id, script_name)
