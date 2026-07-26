@@ -457,6 +457,100 @@ class ProxyServer:
             name = name.rsplit(":", 1)[0]
         return name in self._CA_HOSTS
 
+    def _is_direct_hit(self, url: str, headers: dict) -> bool:
+        """True when a browser is talking to this listener as if it were a site.
+
+        A proxied request always carries an absolute URL. An origin-form path
+        with a Host naming this machine means nobody configured a proxy — they
+        typed the address in — so there is exactly one useful thing to answer:
+        how to trust the certificate.
+
+        Deliberately narrow. A Host header pointing anywhere else is real
+        proxy traffic from a client that omitted the absolute form, and must
+        keep being relayed.
+        """
+        if "://" in url:
+            return False                      # proxied; not a direct visit
+        host = self._header_value(headers, "host").strip().lower()
+        if not host:
+            return False
+
+        name, _, port_txt = host.rpartition(":")
+        if not name or "]" not in host and name.count(":") > 0:
+            name, port_txt = host, ""         # bare IPv6 or no port
+        name = name.strip("[]")
+
+        # The port is the reliable signal, not the address. A cloud VM's
+        # public IP is usually not on any local interface — it is NAT'd — so
+        # matching against our own addresses missed exactly the case this
+        # exists for: someone typing the VM's public address into a browser.
+        # Nothing legitimately proxied names our listening port as its Host.
+        if port_txt.isdigit() and int(port_txt) == int(self.port):
+            return True
+
+        if name in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return True
+        try:
+            ipaddress.ip_address(name)
+        except ValueError:
+            return False                      # a domain: someone's real traffic
+        return name in self._own_addresses()
+
+    def _own_addresses(self) -> set:
+        """Addresses this machine answers on, cached for the process.
+
+        Used only to recognise "you are talking to me directly", so a stale
+        entry after a network change costs a page, not correctness.
+        """
+        cached = getattr(self, "_own_addr_cache", None)
+        if cached is not None:
+            return cached
+        found = {"127.0.0.1", "::1"}
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None):
+                found.add(info[4][0])
+        except OSError:
+            pass
+        try:
+            # The address a route to the internet would leave from — the LAN
+            # IP a phone would have been given, without needing that route to
+            # work.
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                probe.connect(("192.0.2.1", 9))   # TEST-NET-1, never routed
+                found.add(probe.getsockname()[0])
+            finally:
+                probe.close()
+        except OSError:
+            pass
+        self._own_addr_cache = found
+        return found
+
+    async def _serve_ca_over_tunnel(self, reader, writer) -> None:
+        """Answer the CA page inside an already-established tunnel.
+
+        A SOCKS client has been told the connection succeeded and now speaks
+        plain HTTP down it, so the request line has to be read here rather than
+        by the proxy's own HTTP handler.
+        """
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"),
+                                          timeout=10)
+        except Exception:
+            # Some clients open the tunnel and send nothing; the page is the
+            # only thing this host serves, so answer it anyway.
+            head = b"GET / HTTP/1.1\r\n\r\n"
+        first = head.split(b"\r\n", 1)[0].decode("latin-1", "replace")
+        parts = first.split(" ", 2)
+        path = parts[1] if len(parts) > 1 else "/"
+        if "://" in path:
+            path = urlparse(path).path or "/"
+        try:
+            writer.write(self._ca_help_response(path))
+            await writer.drain()
+        except Exception:
+            pass
+
     def _ca_help_response(self, path: str) -> bytes:
         """The CA file itself, or a page explaining how to trust it."""
         from mitm import CA_CERT_FILE
@@ -943,10 +1037,19 @@ class ProxyServer:
             return
 
         if self._is_ca_host(host):
-            # Only reachable over plain HTTP: serving it under TLS would need
-            # the very certificate the device has not trusted yet.
-            log.info("CA help page requested over TLS for %s — telling the "
-                     "client to use http:// instead", host)
+            if port != 443:
+                # A phone pointed at the SOCKS proxy and browsing to
+                # http://aras.ca arrives here, not at the plain-HTTP handler:
+                # SOCKS carries every scheme as a CONNECT. Treating CONNECT as
+                # proof of TLS meant answering "use http:// instead" to someone
+                # already using it, which is the whole reason the page was
+                # unreachable from a phone. Serve it over the tunnel instead.
+                await self._serve_ca_over_tunnel(reader, writer)
+                return
+            # Port 443 genuinely is TLS, and serving it would need the very
+            # certificate the device has not trusted yet.
+            log.info("CA page asked for over TLS (%s:443) — pointing at http",
+                     host)
             body = ("برای نصب گواهی از نشانی http://aras.ca استفاده کنید "
                     "(بدون s در https).").encode()
             try:
@@ -1937,7 +2040,12 @@ class ProxyServer:
         # both are checked.
         _parsed = urlparse(url if "://" in url else "")
         _ca_host = _parsed.hostname or self._header_value(headers, "host")
-        if self._is_ca_host(_ca_host):
+        # A device that has not been given the proxy yet still needs the
+        # certificate, and cannot ask for it through a proxy it is not using.
+        # An origin-form request straight at this listener — someone typing
+        # http://<this machine>:8085 into a browser — is answered with the
+        # page too, which breaks that circle without any client configuration.
+        if self._is_ca_host(_ca_host) or self._is_direct_hit(url, headers):
             writer.write(self._ca_help_response(_parsed.path or url))
             await writer.drain()
             return
