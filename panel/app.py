@@ -1007,6 +1007,13 @@ def create_app() -> Flask:
                 fingerprint=share.get("fingerprint", share_sub.DEFAULT_FINGERPRINT),
             )
         except cloudflare.CloudflareError as exc:
+            # A failure after the script was uploaded still leaves it on the
+            # account. Record the name so the retry reuses it rather than
+            # generating another and abandoning this one.
+            orphan = getattr(exc, "script_name", "")
+            if orphan and not share.get("script_name"):
+                share["script_name"] = orphan
+                store.update(share=share)
             return _fail(exc.message, 502, details=exc.errors)
 
         share.update(

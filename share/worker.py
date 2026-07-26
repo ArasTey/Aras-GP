@@ -112,13 +112,26 @@ def enable_workers_dev(token: str, account_id: str, script_name: str) -> bool:
 
 
 def delete(token: str, account_id: str, script_name: str) -> None:
-    """Remove the deployment. Absent is treated as success."""
+    """Remove the deployment. Already absent counts as success.
+
+    Matched on the message rather than an error code: the code that used to be
+    checked here was 10007, which is Cloudflare's "this account has no
+    workers.dev subdomain" — copied from the function that handles that, and
+    wrong for this one. A substring search for a number over the whole message
+    would also match a script whose name happened to contain it.
+
+    Anything other than a missing script is re-raised. Reporting a failed
+    delete as success would leave a live Worker the panel believes is gone.
+    """
     try:
         _call("DELETE",
               f"/accounts/{account_id}/workers/scripts/{script_name}",
               token)
     except CloudflareError as exc:
-        if "10007" in str(exc) or "not found" in str(exc).lower():
+        text = str(exc).lower()
+        if "not found" in text or "could not find" in text \
+                or "does not exist" in text:
+            log.info("Share worker '%s' was already gone", script_name)
             return
         raise
 
@@ -168,7 +181,16 @@ def deploy(token: str, account_id: str, clients: list[dict],
     }
 
     upload(token, account_id, script_name, load_source(), bindings)
-    enable_workers_dev(token, account_id, script_name)
+    try:
+        enable_workers_dev(token, account_id, script_name)
+    except CloudflareError as exc:
+        # The script is on the account by this point. Letting the failure
+        # propagate bare meant the caller never learned the generated name, so
+        # it was not recorded — and the next attempt generated another random
+        # name and left this one behind. Carry the name out so it can be saved
+        # and reused instead of accumulating orphans.
+        exc.script_name = script_name
+        raise
 
     return {
         "script_name": script_name,
