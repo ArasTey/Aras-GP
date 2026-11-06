@@ -70,3 +70,32 @@ jobs:
       # only ever worked in a checkout that had already run the setup wizard.
       - name: Build image from a clean clone
         run: docker build -t aras-gp:ci .
+
+  wheels:
+    name: Wheels on ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+        python: ["3.10", "3.15"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # The install used to die on platforms where the newest cryptography has
+      # no wheel: pip built the sdist and needed Rust. Resolving with
+      # --only-binary proves every direct dependency has a prebuilt wheel for
+      # this OS/interpreter, so a future pin bump cannot reintroduce that trap.
+      - name: Every dependency resolves to a wheel
+        run: >
+          python -m pip download --only-binary=:all: --prefer-binary --no-deps
+          -r requirements.txt -d wheel-check
+      - name: 32-bit Windows resolves too
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.10'
+        run: >
+          python -m pip download --only-binary=:all: --prefer-binary --no-deps
+          --platform win32 --python-version 310 --implementation cp
+          --abi cp310 --abi abi3 --abi none
+          -r requirements.txt -d wheel-check-win32

@@ -45,7 +45,10 @@ VPY="$VENV_DIR/bin/python"
 echo "[*] Installing dependencies ..."
 "$VPY" -m pip install --disable-pip-version-check -q --upgrade pip >/dev/null
 if ! "$VPY" -m pip install --disable-pip-version-check -q -r requirements.txt; then
-    echo "[X] Could not install dependencies. Check your network and retry." >&2
+    echo "[X] Could not install dependencies." >&2
+    echo "    A 'Failed to build' line above means no prebuilt wheel exists for" >&2
+    echo "    this Python/OS; retry with: $VPY -m pip install --prefer-binary -r requirements.txt" >&2
+    echo "    A download/timeout error means PyPI is unreachable; check the network." >&2
     exit 1
 fi
 

@@ -6,7 +6,11 @@ cd "$(dirname "$0")" || exit 1
 
 for cmd in python3.13 python3.12 python3.11 python3.10 python3 python; do
     if command -v "$cmd" >/dev/null 2>&1; then
-        exec "$cmd" manage.py "$@"
+        ver=$("$cmd" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "0.0")
+        major=${ver%.*}; minor=${ver#*.}
+        if [ "$major" -ge 3 ] && [ "$minor" -ge 10 ]; then
+            exec "$cmd" manage.py "$@"
+        fi
     fi
 done
 

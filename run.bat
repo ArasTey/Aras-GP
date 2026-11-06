@@ -32,6 +32,22 @@ if "%PY%"=="" (
     exit /b 1
 )
 
+REM -------- verify 3.10+ (a 3.9 venv installs but the panel then dies) --------
+set "PYMAJ=0"
+set "PYMIN=0"
+for /f "tokens=1,2" %%a in ('%PY% -c "import sys;print(sys.version_info[0],sys.version_info[1])" 2^>nul') do (
+    set "PYMAJ=%%a"
+    set "PYMIN=%%b"
+)
+set /a PYOK=0
+if %PYMAJ% GTR 3 set /a PYOK=1
+if %PYMAJ% EQU 3 if %PYMIN% GEQ 10 set /a PYOK=1
+if %PYOK% EQU 0 (
+    echo [X] Python 3.10+ is required; found %PYMAJ%.%PYMIN%.
+    pause
+    exit /b 1
+)
+
 if not exist "%VENV_DIR%\Scripts\python.exe" (
     echo [*] Creating virtual environment in %VENV_DIR% ...
     %PY% -m venv "%VENV_DIR%"
@@ -51,7 +67,10 @@ echo [*] Installing dependencies ...
 "%VPY%" -m pip install --disable-pip-version-check -q --upgrade pip >nul
 "%VPY%" -m pip install --disable-pip-version-check -q -r requirements.txt
 if errorlevel 1 (
-    echo [X] Could not install dependencies. Check your network and retry.
+    echo [X] Could not install dependencies.
+    echo     A "Failed to build" line above means no prebuilt wheel exists for
+    echo     this Python/OS; retry with: "%VPY%" -m pip install --prefer-binary -r requirements.txt
+    echo     A download/timeout error means PyPI is unreachable; check the network.
     pause
     exit /b 1
 )

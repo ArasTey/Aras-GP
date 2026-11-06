@@ -4,7 +4,7 @@
 Domain Fronting از طریق Google Apps Script + Cloudflare Workers).
 
 پنل **موتور رله را بازنویسی نمی‌کند**. یک لایه‌ی Flask روی همان کد موجود در
-`src/` است که آن را پیکربندی، اجرا، پایش و دیپلوی می‌کند.
+`engine/` است که آن را پیکربندی، اجرا، پایش و دیپلوی می‌کند.
 
 ---
 
@@ -13,7 +13,7 @@ Domain Fronting از طریق Google Apps Script + Cloudflare Workers).
 ```bash
 python3 -m venv .venv                # ویندوز: py -m venv .venv
 source .venv/bin/activate            # ویندوز: .venv\Scripts\activate
-pip install -r requirements.txt -r panel/requirements.txt
+pip install -r requirements.txt      # از ریشه‌ی ریپو؛ پنل هم داخلش هست
 
 python -m panel
 ```

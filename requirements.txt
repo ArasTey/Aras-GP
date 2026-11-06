@@ -28,11 +28,14 @@ h2>=4.1.0
 # CA bundle for TLS verification — skipped on Windows (uses system cert store).
 certifi>=2024.1.0; sys_platform != "win32"
 
-# Brotli decompression (modern websites send `br` encoding)
+# Brotli decompression (modern websites send `br` encoding). Optional: codec.py
+# falls back to gzip/deflate without it.
 brotli>=1.1.0
 
-# Zstandard decompression (some CDNs now serve `zstd`)
-zstandard>=0.22.0
+# Zstandard decompression (some CDNs now serve `zstd`). Optional, same fallback.
+# No cp315 wheel exists yet, so 3.15 skips it instead of failing to compile;
+# every other supported platform/interpreter has a wheel.
+zstandard>=0.22.0; python_version < "3.15"
 
 # LAN interface detection uses only the Python standard library
 # (works on Windows, Linux, macOS, Android/Termux without a C compiler).
