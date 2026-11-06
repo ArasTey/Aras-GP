@@ -77,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.15"]
     steps:
       - uses: actions/checkout@v4
@@ -99,3 +99,11 @@ jobs:
           --platform win32 --python-version 310 --implementation cp
           --abi cp310 --abi abi3 --abi none
           -r requirements.txt -d wheel-check-win32
+      # No Intel-Mac runner exists any more, so resolve that target from Linux.
+      - name: Intel macOS resolves too
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.10'
+        run: >
+          python -m pip download --only-binary=:all: --prefer-binary --no-deps
+          --platform macosx_10_9_x86_64 --python-version 310 --implementation cp
+          --abi cp310 --abi abi3 --abi none
+          -r requirements.txt -d wheel-check-macintel

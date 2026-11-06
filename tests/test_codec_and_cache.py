@@ -125,10 +125,17 @@ class TestResponseCache:
         resp = _http_response(b"from disk")
 
         async def cold_memory_read():
-            # put_async writes memory synchronously and disk fire-and-forget;
-            # inside a loop both work, then we emulate a cold memory tier.
+            # put_async writes memory synchronously and disk fire-and-forget.
+            # Wait for the in-flight write to finish instead of sleeping a fixed
+            # interval: on a loaded runner 50ms was not enough and the disk read
+            # came back empty, failing the test for a scheduling reason.
             cache.put_async("https://x/a", resp, ttl=60)
-            await asyncio.sleep(0.05)          # let the disk write run
+
+            async def drain():
+                while "https://x/a" in cache._pending:
+                    await asyncio.sleep(0.001)
+
+            await asyncio.wait_for(drain(), timeout=5)
             cache._store.clear()
             cache._size = 0
             return await cache.get_async("https://x/a")
