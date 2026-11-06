@@ -48,7 +48,13 @@ def has_zstd() -> bool:
     return _HAS_ZSTD
 
 
-def decode(body: bytes, encoding: str) -> bytes:
+#: Cap on stacked Content-Encodings ("gzip, br, zstd"). Remote-controlled
+#: depth otherwise: the header comes off the wire, and ~100 layers of gzip
+#: would babble the CPU to death before returning.
+_MAX_LAYERS = 8
+
+
+def decode(body: bytes, encoding: str, depth: int = _MAX_LAYERS) -> bytes:
     """Decode *body* according to Content-Encoding.
 
     Returns the original bytes if the encoding is empty, unknown, or
@@ -62,8 +68,13 @@ def decode(body: bytes, encoding: str) -> bytes:
 
     # Multi-coding (rare): "gzip, br" means brotli(gzip(data))
     if "," in enc:
-        for layer in reversed([s.strip() for s in enc.split(",") if s.strip()]):
-            body = decode(body, layer)
+        layers = [s.strip() for s in enc.split(",") if s.strip()]
+        if len(layers) > depth:
+            log.debug("content-encoding chain deeper than %d layers (%d) "
+                      "— passing through", depth, len(layers))
+            return body
+        for layer in reversed(layers):
+            body = decode(body, layer, depth)
         return body
 
     try:
