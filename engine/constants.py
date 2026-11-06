@@ -8,7 +8,7 @@ overridden from `config.json` where noted.
 from __future__ import annotations
 
 # ── Version ───────────────────────────────────────────────────────────────
-__version__ = "2.3.0"
+__version__ = "2.3.1"
 
 
 # ── Size caps ─────────────────────────────────────────────────────────────
