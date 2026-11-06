@@ -381,12 +381,20 @@ def install_deps() -> bool:
             print(red("  Failed to create the virtualenv."))
             return False
     print(blue("  Installing / updating dependencies..."))
-    _run([str(VENV_PY), "-m", "pip", "install", "--disable-pip-version-check",
-          "-q", "--upgrade", "pip"])
+    up = _run([str(VENV_PY), "-m", "pip", "install", "--disable-pip-version-check",
+               "-q", "--upgrade", "pip"])
+    if up != 0:
+        print(yellow("  Could not upgrade pip; continuing with the bundled one."))
     rc = _run([str(VENV_PY), "-m", "pip", "install", "--disable-pip-version-check",
                "-q", "-r", str(REQUIREMENTS)])
     if rc != 0:
-        print(red("  Dependency install failed. Check your connection."))
+        print(red("  Dependency install failed."))
+        print(dim("     A 'Failed to build' line above means pip found no prebuilt"))
+        print(dim("     wheel for this Python/OS and tried to compile instead."))
+        print(dim("     Retry with:  %s -m pip install --prefer-binary -r %s"
+                  % (VENV_PY, REQUIREMENTS)))
+        print(dim("     A download/timeout error means PyPI is unreachable from"))
+        print(dim("     this network; check the connection or a mirror."))
         return False
     print(green("  Ready."))
     return True

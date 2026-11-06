@@ -3,6 +3,12 @@
 #
 #   pip install -r requirements.txt
 #
+# Prefer prebuilt wheels over sdists: the newest cryptography no longer ships
+# wheels for 32-bit Windows and Intel macOS, and building its sdist needs a Rust
+# toolchain most users do not have. --prefer-binary falls back to the newest
+# version that still has a wheel for this platform instead of failing to build.
+--prefer-binary
+#
 # The panel used to be missing from this file, so `run.sh` / `run.bat` built a
 # virtualenv without Flask in it and `python -m panel` died on an import error
 # that named a module and nothing else. Splitting the two lists only ever

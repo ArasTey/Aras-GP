@@ -17,6 +17,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A tag may be repointed at a fix without cutting a new version, so
+          # replace an existing release for the same tag instead of failing.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release delete "$GITHUB_REF_NAME" --yes
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --generate-notes \
             --title "Aras-GP $GITHUB_REF_NAME" \
