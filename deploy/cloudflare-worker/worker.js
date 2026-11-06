@@ -11,6 +11,14 @@
 
 const WORKER_URL = "myworker.workers.dev";
 
+// Shared secret the desktop engine's relay engine puts in every payload
+// ("k"). Substituted at deploy time by the panel (panel/cloudflare.py). When
+// empty the check is skipped — the historical unauthenticated behaviour.
+// Without this the Worker accepts any POST with a URL, so a discovered
+// workers.dev URL made it an open fetch proxy carrying other people's traffic
+// on this account's request quotas.
+const AUTH_KEY = "__ARAS_AUTH_KEY__";
+
 export default {
     async fetch(request, env) {
         try {
@@ -29,17 +37,23 @@ export default {
 
             const req = await request.json();
 
-            if (!req.u) {
+            if (!req.u || typeof req.u !== "string") {
                 return json({ e: "missing url" }, 400);
+            }
+
+            if (AUTH_KEY && req.k !== AUTH_KEY) {
+                return json({ e: "unauthorized" }, 403);
             }
 
             const targetUrl = new URL(req.u);
 
-            const BLOCKED_HOSTS = [
-                WORKER_URL,
-            ];
-
-            if (BLOCKED_HOSTS.some(h => targetUrl.hostname.endsWith(h))) {
+            // Self-fetch guard: the relay must not relay to itself. Exact
+            // hostname or subdomain only — endsWith(workers.dev) alone would
+            // match a lookalike like "evil-workers.dev" and refuse legit
+            // traffic aimed there instead.
+            const selfHost = WORKER_URL.toLowerCase();
+            const targetHost = targetUrl.hostname.toLowerCase().replace(/\.$/, "");
+            if (targetHost === selfHost || targetHost.endsWith("." + selfHost)) {
                 return json({ e: "self-fetch blocked" }, 400);
             }
 

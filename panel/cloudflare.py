@@ -224,20 +224,36 @@ def load_worker_source() -> str:
         return handle.read()
 
 
-def render_worker(script_name: str, subdomain: str, source: str | None = None) -> str:
+def render_worker(script_name: str, subdomain: str, source: str | None = None,
+                  auth_key: str = "") -> str:
     """Point the worker's self-fetch guard at its own real hostname.
 
     ``worker.js`` ships with ``const WORKER_URL = "myworker.workers.dev";`` and
     uses it to refuse relaying requests aimed back at itself (a loop). Once we
     know the deployed hostname we substitute it in.
+
+    The same pass fills in the Worker's own shared secret
+    (``const AUTH_KEY = "__ARAS_AUTH_KEY__";``), so the Worker refuses fetch
+    jobs it did not ask for. With no key the placeholder is overwritten with an
+    empty string and the Worker stays as unauthenticated as it has always been
+    — the relay chain never breaks.
     """
     source = source if source is not None else load_worker_source()
+    # json.dumps as the value: a replacement string is not — re.sub would
+    # eat the escapes in a key containing backslashes. gasgen.render uses
+    # the same lambda-guard for the same reason.
+    source = re.sub(
+        r'const\s+AUTH_KEY\s*=\s*"[^"]*"\s*;',
+        lambda _m: f'const AUTH_KEY = {json.dumps(str(auth_key or ""))};',
+        source,
+        count=1,
+    )
     hostname = f"{script_name}.{subdomain}.workers.dev" if subdomain else ""
     if not hostname:
         return source
     return re.sub(
         r'const\s+WORKER_URL\s*=\s*"[^"]*"\s*;',
-        f'const WORKER_URL = "{hostname}";',
+        lambda _m: f'const WORKER_URL = "{hostname}";',
         source,
         count=1,
     )
@@ -451,6 +467,7 @@ def resolve_account_id(token: str, account_id: str = "") -> str:
 
 
 def deploy(token: str, account_id: str, script_name: str,
+           auth_key: str = "",
 ) -> dict:
     """Full deploy. Returns the public worker URL and the steps that ran."""
     script_name = validate_script_name(script_name)
@@ -476,7 +493,7 @@ def deploy(token: str, account_id: str, script_name: str,
         f"{subdomain}.workers.dev" + (" (تازه ساخته شد)" if created else ""),
     )
 
-    source = render_worker(script_name, subdomain)
+    source = render_worker(script_name, subdomain, auth_key=auth_key)
     upload_script(token, account_id, script_name, source)
     detail = f"{len(source)} بایت"
     record("آپلود اسکریپت", True, detail)

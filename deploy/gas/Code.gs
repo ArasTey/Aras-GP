@@ -13,7 +13,7 @@ function doPost(e) {
     var req = JSON.parse(e.postData.contents);
     if (req.k !== AUTH_KEY) return _json({ e: "unauthorized" });
 
-    if (Array.isArray(req.q)) return _doBatch(req.q);
+    if (Array.isArray(req.q)) return _doBatch(req.q, req.k);
     return _doSingle(req);
 
   } catch (err) {
@@ -43,7 +43,7 @@ function _doSingle(req) {
   }
 }
 
-function _doBatch(items) {
+function _doBatch(items, authKey) {
   var fetchArgs = [];
   var errorMap = {};
 
@@ -55,7 +55,7 @@ function _doBatch(items) {
       continue;
     }
 
-    var payload = _buildWorkerPayload(item);
+    var payload = _buildWorkerPayload(item, authKey);
 
     fetchArgs.push({
       _i: i,
@@ -94,7 +94,7 @@ function _doBatch(items) {
   return _json({ q: results });
 }
 
-function _buildWorkerPayload(req) {
+function _buildWorkerPayload(req, authKey) {
   var headers = {};
 
   if (req.h && typeof req.h === "object") {
@@ -111,7 +111,10 @@ function _buildWorkerPayload(req) {
     h: headers,
     b: req.b || null,
     ct: req.ct || null,
-    r: req.r !== false
+    r: req.r !== false,
+    // The Worker's own shared secret — the relay must not accept fetch jobs
+    // from anyone other than this script.
+    k: authKey !== undefined ? authKey : (req.k || null)
   };
 
   return out;

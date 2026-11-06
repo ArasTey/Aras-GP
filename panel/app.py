@@ -675,9 +675,17 @@ def create_app() -> Flask:
         script_name = (body.get("script_name") or "aras-relay").strip()
         remember = str(body.get("remember_token", "")).lower() in ("1", "true", "on")
 
+        # The Worker's own secret is the relay's auth_key, minted here if the
+        # config has none yet. Deploying the Worker, generating Code.gs and
+        # starting the relay all read this one value, so the three sides can
+        # never disagree.
+        config = _config_with_auth_key()
         try:
             token = _cf_token(body)
-            result = cloudflare.deploy(token, account_id, script_name)
+            result = cloudflare.deploy(
+                token, account_id, script_name,
+                auth_key=str(config.get("auth_key") or ""),
+            )
         except ValueError as exc:
             return _fail(str(exc))
         except cloudflare.CloudflareError as exc:
