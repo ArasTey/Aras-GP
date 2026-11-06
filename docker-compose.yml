@@ -2,14 +2,24 @@ name: "Aras-GP-docker"
 
 services:
   Aras-GP:
-    image: .
+    build: .
     container_name: "Aras-GP"
     restart: unless-stopped
+    volumes:
+      # config.json holds the auth key and is deliberately excluded from the
+      # image (see .dockerignore), so it is mounted read-only at run time.
+      - ./config.json:/app/config.json:ro
+      # Without this the relay mints a brand-new CA on every restart and every
+      # client has to re-trust the certificate.
+      - aras-ca:/app/ca
     networks:
       - Aras-GP-proxy
     ports:
       - "8085:8085" # http port
       - "1080:1080" # socks5 port
+
+volumes:
+  aras-ca:
 
 networks:
   Aras-GP-proxy:

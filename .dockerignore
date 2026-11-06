@@ -1,0 +1,27 @@
+# The image is built from the repository, so anything holding local state or
+# secrets must stay out of it — `COPY . .` would otherwise bake the CA private
+# key, the panel password file and config.json into an image layer.
+.git
+.gitignore
+.dockerignore
+
+# Interpreters and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Secrets and local state — mounted at runtime instead (see docker-compose.yml)
+config.json
+ca/
+panel/data/
+backups/
+*.license.key
+*.pem
+domainfront_certs_*/
+
+# Docs and OS noise
+docs/screenshots/
+.DS_Store
